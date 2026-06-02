@@ -1,0 +1,150 @@
+╔═════════════════════════════════════════════════════════════════════════╗
+║                      🚀 JARVIS 2.0 - INICIO RÁPIDO                    ║
+╚═════════════════════════════════════════════════════════════════════════╝
+
+📋 CHECKLIST INICIAL
+═══════════════════════════════════════════════════════════════════════════
+
+[ ] 1. DESCARGAR ARCHIVOS
+    └─ Descarga la carpeta JARVIS_2.0 con todos los archivos
+
+[ ] 2. INSTALAR PYTHON (si no lo tienes)
+    └─ https://www.python.org/downloads/
+    └─ ✅ Marca "Add Python to PATH"
+    └─ Reinicia Windows
+
+[ ] 3. INSTALAR NODE.JS (si no lo tienes)
+    └─ https://nodejs.org/ (LTS)
+    └─ Reinicia Windows
+
+[ ] 4. OBTENER CLAVES API
+    └─ Claude: https://console.anthropic.com → API Keys
+    └─ OpenAI: https://platform.openai.com/account/api-keys
+
+[ ] 5. CONFIGURAR ARCHIVO .env
+    └─ Abre: .env.example
+    └─ Reemplaza: CLAUDE_API_KEY=tu_clave_aqui
+    └─ Reemplaza: OPENAI_API_KEY=tu_clave_aqui
+    └─ Guarda como: .env
+
+═══════════════════════════════════════════════════════════════════════════
+
+🔧 INSTALACIÓN (SOLO UNA VEZ)
+═══════════════════════════════════════════════════════════════════════════
+
+1. Abre la carpeta JARVIS_2.0
+2. Haz DOBLE CLICK en: instalar.bat
+3. Espera a que termine (2-3 min)
+
+✅ Listo! Las dependencias están instaladas
+
+═══════════════════════════════════════════════════════════════════════════
+
+▶️ EJECUTAR (CADA VEZ QUE QUIERAS USAR)
+═══════════════════════════════════════════════════════════════════════════
+
+OPCIÓN A - Automático:
+─────────────────────
+1. Abre Terminal 1 (CMD) en la carpeta: iniciar_backend.bat
+2. Abre Terminal 2 (CMD) en la carpeta: iniciar_frontend.bat
+3. Se abre el navegador automáticamente
+
+OPCIÓN B - Manual:
+──────────────────
+Terminal 1:
+  cd C:\ruta\a\JARVIS_2.0
+  call venv\Scripts\activate.bat
+  python siri_2.0_backend.py
+
+Terminal 2:
+  cd C:\ruta\a\JARVIS_2.0
+  npm start
+
+═══════════════════════════════════════════════════════════════════════════
+
+🎮 USAR JARVIS
+═══════════════════════════════════════════════════════════════════════════
+
+1. Abre: http://localhost:3000
+2. Click en el botón azul grande 🎤
+3. Habla: "¿Cuál es la capital de Francia?"
+4. Escucha la respuesta automática
+
+═══════════════════════════════════════════════════════════════════════════
+
+🔗 URLs IMPORTANTES
+═══════════════════════════════════════════════════════════════════════════
+
+Frontend:       http://localhost:3000
+Backend:        http://localhost:8000
+WebSocket:      ws://localhost:8000/ws
+Health Check:   http://localhost:8000/health
+
+═══════════════════════════════════════════════════════════════════════════
+
+📌 VARIABLES DE ENTORNO (.env)
+═══════════════════════════════════════════════════════════════════════════
+
+CLAUDE_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GOOGLE_CLOUD_KEY=/path/to/credentials.json (opcional)
+
+═══════════════════════════════════════════════════════════════════════════
+
+⚠️ PROBLEMAS COMUNES
+═══════════════════════════════════════════════════════════════════════════
+
+Problema: "Python no encontrado"
+Solución: 
+  → Reinstala Python con "Add Python to PATH" MARCADO
+  → Reinicia Windows
+
+Problema: "npm: command not found"
+Solución:
+  → Instala Node.js desde https://nodejs.org/
+  → Reinicia Windows
+
+Problema: "WebSocket connection failed"
+Solución:
+  → Verifica que backend.bat esté corriendo
+  → Abre cmd: netstat -ano | findstr :8000
+  → Cierra lo que use puerto 8000
+
+Problema: "API Key inválida"
+Solución:
+  → Verifica que .env tenga las claves correctas
+  → No debe haber espacios extras
+  → Prueba con claves nuevas
+
+Problema: "Micrófono no funciona"
+Solución:
+  → Click en icono candado (izquierda de URL)
+  → Permite acceso a micrófono
+  → Actualiza página (F5)
+
+═══════════════════════════════════════════════════════════════════════════
+
+💡 TIPS
+═══════════════════════════════════════════════════════════════════════════
+
+1. Usa CLAUDE para respuestas rápidas y precisas
+2. Usa GPT-4 para respuestas más creativas
+3. El historial se borra al refrescar la página
+4. Puedes acceder desde móvil con la IP del PC
+5. Los comandos de voz funcionan mejor en Chrome/Edge
+
+═══════════════════════════════════════════════════════════════════════════
+
+📞 ¿NECESITAS AYUDA?
+═══════════════════════════════════════════════════════════════════════════
+
+Lee: README_WINDOWS.md (instrucciones completas)
+Busca errores en las terminales CMD
+Verifica logs en la consola del navegador (F12)
+
+═══════════════════════════════════════════════════════════════════════════
+
+¡DISFRUTA TU JARVIS! 🚀
+
+"Sir, I seem to have made an error in my calculations."
+                                            - JARVIS
