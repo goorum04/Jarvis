@@ -15,6 +15,7 @@ import openai
 from google.cloud import texttospeech
 import speech_recognition as sr
 import base64
+import tempfile
 from typing import Optional
 import logging
 
@@ -159,12 +160,14 @@ async def text_to_speech(text: str) -> Optional[bytes]:
         
         # Para español
         engine.setProperty('voice', 'spanish')
-        
-        # Guardar a archivo temporal
-        engine.save_to_file(text, '/tmp/response.mp3')
+
+        # Guardar a archivo temporal compatible con Windows y Linux
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+            tmp_path = tmp.name
+        engine.save_to_file(text, tmp_path)
         engine.runAndWait()
-        
-        with open('/tmp/response.mp3', 'rb') as f:
+
+        with open(tmp_path, 'rb') as f:
             return f.read()
     except Exception as e:
         logger.error(f"Error en TTS fallback: {e}")
