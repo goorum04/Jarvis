@@ -12,7 +12,7 @@ import os
 from dotenv import load_dotenv
 import anthropic
 import openai
-from google.cloud import texttospeech
+from elevenlabs.client import ElevenLabs
 import speech_recognition as sr
 import base64
 import tempfile
@@ -27,21 +27,12 @@ logger = logging.getLogger(__name__)
 # APIs
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# Debe ser la RUTA al archivo .json de credenciales, no el contenido
-GOOGLE_CLOUD_CREDENTIALS_PATH = os.getenv("GOOGLE_CLOUD_CREDENTIALS_PATH")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 # Inicializar clientes
 client_anthropic = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 client_openai = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-# Si tienes credenciales de Google Cloud
-try:
-    if GOOGLE_CLOUD_CREDENTIALS_PATH:
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GOOGLE_CLOUD_CREDENTIALS_PATH
-    tts_client = texttospeech.TextToSpeechClient()
-except Exception:
-    tts_client = None
-    logger.warning("Google Cloud TTS no disponible, usaremos respaldo")
+client_elevenlabs = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 app = FastAPI(title="JARVIS 2.0")
 
@@ -127,41 +118,28 @@ async def process_with_claude(user_input: str, use_gpt: bool = False) -> str:
 
 async def text_to_speech(text: str) -> Optional[bytes]:
     """
-    Convertir texto a audio usando Google Cloud TTS
-    Si no está disponible, usar fallback simple
+    Convierte texto a audio usando ElevenLabs (voz 'George', grave y profesional).
+    Fallback a pyttsx3 si ElevenLabs no está disponible.
     """
     try:
-        if tts_client:
-            synthesis_input = texttospeech.SynthesisInput(text=text)
-            voice = texttospeech.VoiceSelectionParams(
-                language_code="es-ES",
-                name="es-ES-Neural2-A",
-                ssml_gender=texttospeech.SsmlVoiceGender.MALE
-            )
-            audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.MP3
-            )
-            
-            response = tts_client.synthesize_speech(
-                input=synthesis_input,
-                voice=voice,
-                audio_config=audio_config
-            )
-            return response.audio_content
+        audio_stream = client_elevenlabs.generate(
+            text=text,
+            voice="George",              # grave, masculino, ideal para JARVIS
+            model="eleven_multilingual_v2",  # soporta español
+            stream=False
+        )
+        return b"".join(audio_stream)
     except Exception as e:
-        logger.error(f"Error en TTS: {e}")
-    
-    # Fallback: usar pyttsx3 (TTS local)
+        logger.error(f"Error en ElevenLabs TTS: {e}")
+
+    # Fallback local con pyttsx3
     try:
         import pyttsx3
         engine = pyttsx3.init()
         engine.setProperty('rate', 150)
         engine.setProperty('volume', 1.0)
-        
-        # Para español
         engine.setProperty('voice', 'spanish')
 
-        # Guardar a archivo temporal compatible con Windows y Linux
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
             tmp_path = tmp.name
         engine.save_to_file(text, tmp_path)
