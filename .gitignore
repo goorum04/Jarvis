@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+jarvis_memory.db
+
+# RAG: los documentos y el índice son propios de cada instalación/cliente
+docs/*
+!docs/.gitkeep
+chroma_db/

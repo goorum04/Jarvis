@@ -1,50 +1,239 @@
 """
-JARVIS 2.0 - Backend FastAPI
-Sistema de asistente IA inteligente con voz en tiempo real
+JARVIS 2.0 - Backend con agente, memoria persistente y recordatorios proactivos
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import asyncio
 import json
 import os
+import sqlite3
+from datetime import datetime, date
 from dotenv import load_dotenv
 import anthropic
 import openai
-from google.cloud import texttospeech
-import speech_recognition as sr
+from elevenlabs.client import ElevenLabs
 import base64
+import tempfile
 from typing import Optional
 import logging
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Configuración
+from rag import retrieve_context
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# APIs
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# Debe ser la RUTA al archivo .json de credenciales, no el contenido
-GOOGLE_CLOUD_CREDENTIALS_PATH = os.getenv("GOOGLE_CLOUD_CREDENTIALS_PATH")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Madrid")
 
-# Inicializar clientes
 client_anthropic = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 client_openai = openai.OpenAI(api_key=OPENAI_API_KEY)
+client_elevenlabs = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
-# Si tienes credenciales de Google Cloud
-try:
-    if GOOGLE_CLOUD_CREDENTIALS_PATH:
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = GOOGLE_CLOUD_CREDENTIALS_PATH
-    tts_client = texttospeech.TextToSpeechClient()
-except Exception:
-    tts_client = None
-    logger.warning("Google Cloud TTS no disponible, usaremos respaldo")
+# ── DATABASE ──────────────────────────────────────────────────────────────────
+
+DB_PATH = "jarvis_memory.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            remind_at DATETIME NOT NULL,
+            notified INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            due_date DATE,
+            completed INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ── TOOL DEFINITIONS ──────────────────────────────────────────────────────────
+
+TOOLS = [
+    {
+        "name": "save_reminder",
+        "description": "Guarda un recordatorio con fecha y hora exacta. JARVIS avisará proactivamente cuando llegue ese momento, sin que el usuario tenga que preguntar.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Qué recordar"},
+                "remind_at": {"type": "string", "description": "Fecha y hora en formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)"}
+            },
+            "required": ["text", "remind_at"]
+        }
+    },
+    {
+        "name": "save_task",
+        "description": "Guarda una tarea pendiente, con fecha límite opcional.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Descripción de la tarea"},
+                "due_date": {"type": "string", "description": "Fecha límite en formato YYYY-MM-DD (opcional)"}
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "get_today_pending",
+        "description": "Obtiene todas las tareas pendientes y recordatorios de hoy y próximos. Usar cuando el usuario pregunta qué tiene pendiente.",
+        "input_schema": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "complete_task",
+        "description": "Marca una tarea como completada.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "ID de la tarea"}
+            },
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "save_note",
+        "description": "Guarda una nota o información importante para consultar más tarde.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Título de la nota (opcional)"},
+                "content": {"type": "string", "description": "Contenido de la nota"}
+            },
+            "required": ["content"]
+        }
+    },
+    {
+        "name": "search_notes",
+        "description": "Busca en las notas guardadas.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Término a buscar en notas"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "delete_reminder",
+        "description": "Cancela un recordatorio pendiente.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reminder_id": {"type": "integer", "description": "ID del recordatorio a cancelar"}
+            },
+            "required": ["reminder_id"]
+        }
+    }
+]
+
+# ── TOOL EXECUTORS ────────────────────────────────────────────────────────────
+
+def execute_tool(name: str, inputs: dict) -> dict:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    try:
+        if name == "save_reminder":
+            c.execute(
+                "INSERT INTO reminders (text, remind_at) VALUES (?, ?)",
+                (inputs["text"], inputs["remind_at"])
+            )
+            conn.commit()
+            return {"success": True, "id": c.lastrowid, "remind_at": inputs["remind_at"]}
+
+        elif name == "save_task":
+            c.execute(
+                "INSERT INTO tasks (text, due_date) VALUES (?, ?)",
+                (inputs["text"], inputs.get("due_date"))
+            )
+            conn.commit()
+            return {"success": True, "task_id": c.lastrowid}
+
+        elif name == "get_today_pending":
+            today = date.today().isoformat()
+            c.execute("""
+                SELECT id, text, due_date FROM tasks
+                WHERE completed = 0 AND (due_date IS NULL OR due_date <= ?)
+                ORDER BY due_date ASC NULLS LAST
+            """, (today,))
+            tasks = [dict(r) for r in c.fetchall()]
+
+            c.execute("""
+                SELECT id, text, remind_at FROM reminders
+                WHERE notified = 0
+                ORDER BY remind_at ASC
+            """)
+            reminders = [dict(r) for r in c.fetchall()]
+            return {"tasks": tasks, "reminders": reminders}
+
+        elif name == "complete_task":
+            c.execute("UPDATE tasks SET completed = 1 WHERE id = ?", (inputs["task_id"],))
+            conn.commit()
+            return {"success": True}
+
+        elif name == "save_note":
+            c.execute(
+                "INSERT INTO notes (title, content) VALUES (?, ?)",
+                (inputs.get("title"), inputs["content"])
+            )
+            conn.commit()
+            return {"success": True, "note_id": c.lastrowid}
+
+        elif name == "search_notes":
+            q = f"%{inputs['query']}%"
+            c.execute("""
+                SELECT id, title, content, created_at FROM notes
+                WHERE title LIKE ? OR content LIKE ?
+                ORDER BY created_at DESC LIMIT 5
+            """, (q, q))
+            return {"notes": [dict(r) for r in c.fetchall()]}
+
+        elif name == "delete_reminder":
+            c.execute("DELETE FROM reminders WHERE id = ? AND notified = 0", (inputs["reminder_id"],))
+            conn.commit()
+            deleted = c.rowcount > 0
+            return {"success": deleted}
+
+        else:
+            return {"error": f"Herramienta desconocida: {name}"}
+
+    except Exception as e:
+        logger.error(f"Error en tool {name}: {e}")
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+# ── FASTAPI + WEBSOCKET ───────────────────────────────────────────────────────
 
 app = FastAPI(title="JARVIS 2.0")
 
-# CORS para móvil y PC
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,264 +242,224 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Variables globales
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
-    
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-    
+
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-    
+
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        for conn in self.active_connections:
             try:
-                await connection.send_json(message)
+                await conn.send_json(message)
             except Exception as e:
-                logger.error(f"Error broadcasting: {e}")
+                logger.error(f"Error broadcast: {e}")
 
 manager = ConnectionManager()
 
-# Sistema de conversación
+# ── AGENT LOOP ────────────────────────────────────────────────────────────────
+
 conversation_history = []
-MAX_HISTORY = 20  # Mantener últimos 20 mensajes
+MAX_HISTORY = 20
 
 def add_to_history(role: str, content: str):
-    """Agregar mensaje al historial"""
     conversation_history.append({"role": role, "content": content})
     if len(conversation_history) > MAX_HISTORY:
         conversation_history.pop(0)
 
-async def process_with_claude(user_input: str, use_gpt: bool = False) -> str:
-    """
-    Procesar entrada con Claude o GPT
-    """
-    try:
-        if use_gpt:
-            logger.info(f"Procesando con GPT: {user_input}")
-            response = client_openai.chat.completions.create(
-                model="gpt-4-turbo",
-                messages=[
-                    {"role": "system", "content": "Eres JARVIS, el asistente de IA de Iron Man. Responde de forma concisa, profesional y futurista. Máximo 2-3 oraciones."},
-                    *conversation_history[-5:],
-                    {"role": "user", "content": user_input}
-                ],
-                temperature=0.7,
-                max_tokens=150
-            )
-            reply = response.choices[0].message.content
-        else:
-            logger.info(f"Procesando con Claude: {user_input}")
-            response = client_anthropic.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=150,
-                system="Eres JARVIS, el asistente de IA de Iron Man. Responde de forma concisa, profesional y futurista. Máximo 2-3 oraciones.",
-                messages=[
-                    *conversation_history[-5:],
-                    {"role": "user", "content": user_input}
-                ]
-            )
-            reply = response.content[0].text
-        
-        add_to_history("user", user_input)
-        add_to_history("assistant", reply)
-        return reply
-        
-    except Exception as e:
-        logger.error(f"Error procesando con IA: {e}")
-        return "Lo siento, hubo un error procesando tu solicitud."
+async def run_agent(user_input: str) -> str:
+    messages = [*conversation_history[-10:], {"role": "user", "content": user_input}]
+
+    system_prompt = (
+        f"Eres JARVIS, asistente IA personal. Responde siempre en español, de forma concisa y profesional. "
+        f"Fecha y hora actual: {datetime.now().strftime('%A %d de %B de %Y, %H:%M')}. "
+        "Usa las herramientas disponibles cuando el usuario quiera guardar tareas, recordatorios o notas, "
+        "o cuando pregunte qué tiene pendiente. Confirma las acciones brevemente. Máximo 2-3 oraciones."
+    )
+
+    context = retrieve_context(client_openai, user_input)
+    if context:
+        system_prompt += (
+            "\n\nUsa la siguiente información de los documentos del usuario para responder si es relevante "
+            "a la pregunta. Si no tiene relación, ignórala y responde con tu conocimiento general.\n\n"
+            f"{context}"
+        )
+
+    while True:
+        response = client_anthropic.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=500,
+            system=system_prompt,
+            tools=TOOLS,
+            messages=messages
+        )
+
+        if response.stop_reason == "end_turn":
+            text = next((b.text for b in response.content if hasattr(b, "text")), "")
+            add_to_history("user", user_input)
+            add_to_history("assistant", text)
+            return text
+
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                logger.info(f"Tool: {block.name} → {block.input}")
+                result = execute_tool(block.name, block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result, ensure_ascii=False)
+                })
+
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+
+# ── TTS ───────────────────────────────────────────────────────────────────────
 
 async def text_to_speech(text: str) -> Optional[bytes]:
-    """
-    Convertir texto a audio usando Google Cloud TTS
-    Si no está disponible, usar fallback simple
-    """
     try:
-        if tts_client:
-            synthesis_input = texttospeech.SynthesisInput(text=text)
-            voice = texttospeech.VoiceSelectionParams(
-                language_code="es-ES",
-                name="es-ES-Neural2-A",
-                ssml_gender=texttospeech.SsmlVoiceGender.MALE
-            )
-            audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.MP3
-            )
-            
-            response = tts_client.synthesize_speech(
-                input=synthesis_input,
-                voice=voice,
-                audio_config=audio_config
-            )
-            return response.audio_content
+        audio_stream = client_elevenlabs.generate(
+            text=text,
+            voice="George",
+            model="eleven_multilingual_v2",
+            stream=False
+        )
+        return b"".join(audio_stream)
     except Exception as e:
-        logger.error(f"Error en TTS: {e}")
-    
-    # Fallback: usar pyttsx3 (TTS local)
+        logger.error(f"ElevenLabs TTS error: {e}")
+
     try:
         import pyttsx3
         engine = pyttsx3.init()
         engine.setProperty('rate', 150)
         engine.setProperty('volume', 1.0)
-        
-        # Para español
         engine.setProperty('voice', 'spanish')
-        
-        # Guardar a archivo temporal
-        engine.save_to_file(text, '/tmp/response.mp3')
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+            tmp_path = tmp.name
+        engine.save_to_file(text, tmp_path)
         engine.runAndWait()
-        
-        with open('/tmp/response.mp3', 'rb') as f:
+        with open(tmp_path, 'rb') as f:
             return f.read()
     except Exception as e:
-        logger.error(f"Error en TTS fallback: {e}")
+        logger.error(f"pyttsx3 fallback error: {e}")
         return None
+
+# ── PROACTIVE SCHEDULER ───────────────────────────────────────────────────────
+
+async def check_reminders():
+    """Revisa cada 30 segundos si hay recordatorios que disparar."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute(
+        "SELECT id, text FROM reminders WHERE remind_at <= ? AND notified = 0",
+        (now,)
+    )
+    due = c.fetchall()
+    for rid, text in due:
+        c.execute("UPDATE reminders SET notified = 1 WHERE id = ?", (rid,))
+        notification = f"Recordatorio: {text}"
+        logger.info(f"Disparando: {notification}")
+        audio_bytes = await text_to_speech(notification)
+        await manager.broadcast({
+            "type": "proactive_reminder",
+            "text": notification,
+            "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
+            "audio_type": "audio/mp3"
+        })
+    conn.commit()
+    conn.close()
+
+scheduler = AsyncIOScheduler(timezone=TIMEZONE)
+
+@app.on_event("startup")
+async def startup():
+    scheduler.add_job(check_reminders, "interval", seconds=30)
+    scheduler.start()
+    logger.info("Scheduler iniciado — revisando recordatorios cada 30s")
+
+@app.on_event("shutdown")
+async def shutdown():
+    scheduler.shutdown()
+
+# ── WEBSOCKET ENDPOINT ────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    Endpoint WebSocket principal
-    Recibe audio, procesa con IA, devuelve audio
-    """
     await manager.connect(websocket)
     logger.info("Cliente conectado")
-    
     try:
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            
-            msg_type = message.get("type")
-            
-            if msg_type == "audio":
-                # Recibir audio en base64
-                audio_data = message.get("audio")
-                use_gpt = message.get("use_gpt", False)
-                
+
+            if message.get("type") == "audio":
+                user_text = message.get("text", "").strip()
+                if not user_text:
+                    continue
+                await websocket.send_json({"type": "status", "status": "processing"})
                 try:
-                    # Enviar estado: procesando
+                    ai_response = await run_agent(user_text)
+                    audio_bytes = await text_to_speech(ai_response)
                     await websocket.send_json({
-                        "type": "status",
-                        "status": "processing",
-                        "message": "Escuchando..."
+                        "type": "response",
+                        "text": ai_response,
+                        "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
+                        "audio_type": "audio/mp3"
                     })
-                    
-                    # Aquí iría el reconocimiento de voz
-                    # Por ahora, recibimos texto directamente del cliente
-                    user_text = message.get("text", "")
-                    
-                    if user_text:
-                        # Procesar con IA
-                        ai_response = await process_with_claude(user_text, use_gpt=use_gpt)
-                        
-                        # Convertir a voz
-                        audio_bytes = await text_to_speech(ai_response)
-                        
-                        if audio_bytes:
-                            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                            await websocket.send_json({
-                                "type": "response",
-                                "text": ai_response,
-                                "audio": audio_b64,
-                                "audio_type": "audio/mp3"
-                            })
-                        else:
-                            await websocket.send_json({
-                                "type": "response",
-                                "text": ai_response,
-                                "audio": None
-                            })
-                        
-                        # Estado: listo
-                        await websocket.send_json({
-                            "type": "status",
-                            "status": "ready",
-                            "message": "Listo para escuchar"
-                        })
-                
                 except Exception as e:
-                    logger.error(f"Error procesando audio: {e}")
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": str(e)
-                    })
-            
-            elif msg_type == "ping":
+                    logger.error(f"Agent error: {e}")
+                    await websocket.send_json({"type": "error", "message": str(e)})
+                await websocket.send_json({"type": "status", "status": "ready"})
+
+            elif message.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-    
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        logger.info("Cliente desconectado")
     except Exception as e:
-        logger.error(f"Error WebSocket: {e}")
+        logger.error(f"WS error: {e}")
         manager.disconnect(websocket)
+
+# ── REST ENDPOINTS ────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
-    """Health check"""
-    return {
-        "status": "online",
-        "service": "JARVIS 2.0",
-        "version": "1.0.0"
-    }
+    return {"status": "online", "service": "JARVIS 2.0"}
 
-@app.post("/api/chat")
-async def chat(data: dict):
-    """
-    Endpoint REST alternativo para chat
-    """
-    user_input = data.get("text", "")
-    use_gpt = data.get("use_gpt", False)
-    
-    if not user_input:
-        return {"error": "No text provided"}
-    
-    response_text = await process_with_claude(user_input, use_gpt=use_gpt)
-    audio_bytes = await text_to_speech(response_text)
-    
-    if audio_bytes:
-        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-        return {
-            "text": response_text,
-            "audio": audio_b64,
-            "audio_type": "audio/mp3"
-        }
-    
-    return {"text": response_text}
+@app.get("/api/tasks")
+async def get_tasks():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM tasks WHERE completed = 0 ORDER BY due_date ASC")
+    tasks = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return {"tasks": tasks}
 
-@app.get("/api/history")
-async def get_history():
-    """Obtener historial de conversación"""
-    return {"history": conversation_history}
-
-@app.delete("/api/history")
-async def clear_history():
-    """Limpiar historial"""
-    global conversation_history
-    conversation_history = []
-    return {"message": "Historial borrado"}
+@app.get("/api/reminders")
+async def get_reminders():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM reminders WHERE notified = 0 ORDER BY remind_at ASC")
+    reminders = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return {"reminders": reminders}
 
 if __name__ == "__main__":
     import uvicorn
     print("""
-    ╔════════════════════════════════════════════════════════════╗
-    ║          🔵 JARVIS 2.0 - Backend Iniciado 🔵              ║
-    ║                                                            ║
-    ║  WebSocket: ws://localhost:8000/ws                        ║
-    ║  API REST:  http://localhost:8000/api/chat                ║
-    ║  Health:    http://localhost:8000/health                  ║
-    ║                                                            ║
-    ║  Abre el frontend en: http://localhost:3000               ║
-    ╚════════════════════════════════════════════════════════════╝
+    ╔══════════════════════════════════════╗
+    ║       JARVIS 2.0 — Agente IA        ║
+    ║  WebSocket: ws://localhost:8000/ws  ║
+    ║  API:       http://localhost:8000   ║
+    ╚══════════════════════════════════════╝
     """)
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

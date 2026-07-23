@@ -64,6 +64,13 @@ const JARVIS = () => {
           console.error('Error:', data.message);
           setStatus('error');
           break;
+        case 'proactive_reminder':
+          setResponse(data.text);
+          setStatus('reminder');
+          if (data.audio) {
+            playAudio(data.audio);
+          }
+          break;
       }
     };
 
@@ -208,6 +215,7 @@ const JARVIS = () => {
       case 'listening': return '#00d4ff';
       case 'processing': return '#ff6600';
       case 'error': return '#ff3333';
+      case 'reminder': return '#ff00ff';
       default: return '#00ff00';
     }
   };
@@ -218,6 +226,7 @@ const JARVIS = () => {
       case 'processing': return 'Procesando...';
       case 'error': return 'Error';
       case 'disconnected': return 'Desconectado';
+      case 'reminder': return 'Recordatorio';
       default: return 'Listo';
     }
   };
