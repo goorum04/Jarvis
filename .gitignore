@@ -6,4 +6,7 @@ jarvis_memory.db
 # RAG: los documentos y el índice son propios de cada instalación/cliente
 docs/*
 !docs/.gitkeep
+!docs/sensible/
+docs/sensible/*
+!docs/sensible/.gitkeep
 chroma_db/

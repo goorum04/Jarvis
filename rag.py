@@ -4,6 +4,9 @@ JARVIS - RAG sobre los documentos del cliente (carpeta docs/)
 Cada instalación de Jarvis es independiente: solo conoce los documentos
 que están en docs/ de esa instalación. Para darle documentos a un
 cliente nuevo, copia el proyecto, reemplaza docs/ y corre ingest.py.
+
+Los documentos dentro de docs/sensible/ nunca se indexan ni se recuperan,
+así que su contenido nunca se manda a Anthropic/OpenAI como contexto.
 """
 import logging
 from pathlib import Path
@@ -15,6 +18,7 @@ from docx import Document as DocxDocument
 logger = logging.getLogger(__name__)
 
 DOCS_DIR = Path(__file__).parent / "docs"
+SENSITIVE_DIR = DOCS_DIR / "sensible"
 CHROMA_DIR = Path(__file__).parent / "chroma_db"
 COLLECTION_NAME = "jarvis_docs"
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -81,8 +85,12 @@ def ingest_docs(openai_client) -> int:
         collection.delete(ids=existing_ids)
 
     total_chunks = 0
+    skipped_sensitive = 0
     for path in sorted(DOCS_DIR.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in READERS:
+            continue
+        if SENSITIVE_DIR in path.parents:
+            skipped_sensitive += 1
             continue
         try:
             text = READERS[path.suffix.lower()](path)
@@ -101,6 +109,9 @@ def ingest_docs(openai_client) -> int:
         collection.add(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
         total_chunks += len(chunks)
         logger.info(f"Indexado {path.name}: {len(chunks)} trozos")
+
+    if skipped_sensitive:
+        logger.info(f"{skipped_sensitive} documento(s) en docs/sensible/ NO indexados (nunca se envían a Claude/OpenAI)")
 
     return total_chunks
 

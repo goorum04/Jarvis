@@ -8,6 +8,9 @@ Mete tus PDF/Word/TXT/MD en la carpeta docs/ y corre:
 Cada vez que agregues o cambies documentos, vuelve a correrlo para
 reindexar. Requiere OPENAI_API_KEY en el .env (se usa solo para generar
 los embeddings, no para responder).
+
+Los documentos que pongas en docs/sensible/ nunca se indexan ni se
+recuperan, así que Jarvis nunca los manda como contexto a Claude/OpenAI.
 """
 import logging
 import os
