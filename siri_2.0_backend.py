@@ -18,6 +18,8 @@ from typing import Optional
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from rag import retrieve_context
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -280,6 +282,14 @@ async def run_agent(user_input: str) -> str:
         "Usa las herramientas disponibles cuando el usuario quiera guardar tareas, recordatorios o notas, "
         "o cuando pregunte qué tiene pendiente. Confirma las acciones brevemente. Máximo 2-3 oraciones."
     )
+
+    context = retrieve_context(client_openai, user_input)
+    if context:
+        system_prompt += (
+            "\n\nUsa la siguiente información de los documentos del usuario para responder si es relevante "
+            "a la pregunta. Si no tiene relación, ignórala y responde con tu conocimiento general.\n\n"
+            f"{context}"
+        )
 
     while True:
         response = client_anthropic.messages.create(
