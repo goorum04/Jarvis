@@ -1,41 +1,61 @@
 # Configurar JARVIS para Nacho
 
-El cerebro de JARVIS vive en su PC. El iPhone y el coche (CarPlay) escuchan
+El cerebro de JARVIS vive en su Mac. El iPhone y el coche (CarPlay) escuchan
 y hablan a través de Siri y de Atajos de iOS; una tablet en casa u oficina
 hace de panel permanente. Esta guía cubre lo que hay que hacer una sola vez.
 
 Cada parte funciona por separado: si algo no está configurado, JARVIS
 simplemente no lo menciona. Orden recomendado: del 1 al 10.
 
-**Después de cada paso**, ejecutar en el PC:
+**Después de cada paso**, ejecutar en el Mac:
 
 ```
-python diagnostico.py
+./jarvis.sh reiniciar      # si has cambiado el .env
+./jarvis.sh diagnostico
 ```
 
-Revisa cada pieza contra los servicios reales (sin gastar créditos) y dice
-qué funciona, qué falta y cómo arreglarlo. Con `--probar-avisos` manda
-además un aviso de prueba al iPhone. Lo mismo se ve en
-`https://jarvis.sudominio.com/api/status` con el token.
+El diagnóstico revisa cada pieza contra los servicios reales (sin gastar
+créditos) y dice qué funciona, qué falta y cómo arreglarlo. Con
+`--probar-avisos` manda además un aviso de prueba al iPhone. Lo mismo se ve
+en `TU_DIRECCIÓN/api/status` con el token.
 
 ---
 
-## 1. El PC
+## 1. El Mac
 
-1. Instalar dependencias: doble clic en `instalar.bat` (o `pip install -r requirements.txt`).
-2. Copiar `.env.example` como `.env` y rellenar al menos:
-   - `CLAUDE_API_KEY` y `ELEVENLABS_API_KEY`
-   - `JARVIS_API_TOKEN`: una contraseña larga y aleatoria. Es la llave para
-     hablar con JARVIS desde fuera de casa; sin ella cualquiera podría usarlo.
-   - `HOME_LAT`, `HOME_LON` y `HOME_ADDRESS` (casa) y `WORK_ADDRESS` (oficina).
-3. Arrancar: `iniciar_backend.bat`.
+1. Copiar la carpeta de JARVIS a su carpeta personal, por ejemplo `~/JARVIS`.
+   **No** en Documentos, Escritorio, Descargas ni iCloud Drive: macOS no deja
+   a los programas que arrancan solos usar esas carpetas (el instalador avisa).
+2. Instalar **Tailscale** (<https://tailscale.com/download/mac> o la App
+   Store) e iniciar sesión con una cuenta gratuita (paso 6).
+3. Abrir Terminal y ejecutar:
 
-**El PC tiene que estar siempre encendido**: si se suspende, JARVIS deja de
-responder y de avisar.
-- *Configuración → Sistema → Inicio/apagado → Suspender*: **Nunca** (con corriente).
-- Que arranque solo: *Programador de tareas → Crear tarea básica → Al iniciar
-  sesión → Iniciar un programa → `iniciar_backend.bat`*.
-- Alternativa más fiable: un mini-PC dedicado, encendido siempre.
+   ```
+   cd ~/JARVIS
+   bash instalar.command
+   ```
+
+   Prepara Python por su cuenta (no hace falta instalar nada antes), genera
+   el token de acceso, deja JARVIS arrancando solo al encender el Mac y
+   reiniciándose si falla, abre el acceso seguro de Tailscale y termina con
+   el diagnóstico. Al final muestra la **dirección** y el **token** que
+   necesitan el iPhone y la tablet. Se puede volver a ejecutar cuando se
+   quiera; no borra nada.
+4. Rellenar en `.env` al menos `CLAUDE_API_KEY` y `ELEVENLABS_API_KEY`, y
+   también `HOME_LAT`, `HOME_LON`, `HOME_ADDRESS` (casa) y `WORK_ADDRESS`
+   (oficina). Después: `./jarvis.sh reiniciar`.
+
+**El Mac tiene que estar encendido y despierto.** JARVIS impide que se duerma
+por inactividad mientras está en marcha, pero:
+- Si es un **portátil**: tiene que estar enchufado y con la tapa abierta (o
+  cerrada solo si tiene una pantalla externa conectada). Si Nacho se lo lleva
+  o lo cierra, JARVIS deja de responder y de avisar hasta que lo abra.
+- Lo ideal es un **Mac mini** que se quede fijo en casa u oficina, siempre encendido.
+- *Ajustes del Sistema → Batería (o Ahorro de energía) → Opciones*: activar
+  "Arrancar automáticamente tras un corte de corriente".
+
+Comandos del día a día: `./jarvis.sh estado | reiniciar | logs | parar |
+arrancar | diagnostico | google | actualizar`.
 
 ## 2. Gmail y Google Calendar
 
@@ -53,7 +73,8 @@ Se hace en <https://console.cloud.google.com> con la cuenta de Gmail de Nacho.
 4. *APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth*:
    tipo **Aplicación de escritorio**. Descargar el JSON, renombrarlo a
    `google_credentials.json` y dejarlo en la carpeta de JARVIS.
-5. En el PC: `python autorizar_google.py`. Se abre el navegador; Nacho entra
+5. En el Mac: `./jarvis.sh google` (o, si el archivo ya está al instalar, lo
+   hace `instalar.command`). Se abre el navegador; Nacho entra
    con su cuenta y acepta. Como la app es suya y no está verificada por
    Google, saldrá un aviso: *Configuración avanzada → Ir a JARVIS*.
    Queda guardado `google_token.json` y ya no hay que repetirlo.
@@ -62,8 +83,8 @@ Ninguno de esos dos archivos se sube al repositorio (están en `.gitignore`).
 
 Los documentos se crean en su Drive y JARVIS solo tiene acceso a los que crea
 él, no al resto de su Drive. Si Google se autorizó antes de existir esta
-función, `diagnostico.py` lo indica: basta con volver a ejecutar
-`python autorizar_google.py`.
+función, `el diagnóstico lo indica: basta con volver a ejecutar
+`./jarvis.sh google`.
 
 ## 3. Tráfico y navegación
 
@@ -102,16 +123,28 @@ Con permisos **solo de lectura**: JARVIS consulta ventas y pedidos, no toca nada
 
 ## 6. Acceso desde fuera de casa
 
-El iPhone tiene que llegar al PC estando en la calle o en el coche:
+El iPhone y la tablet tienen que llegar al Mac estando en cualquier sitio.
+Se hace con **Tailscale Funnel**, gratis: una dirección `https://` fija para
+el Mac, sin tocar el router, el DNS ni certificados. Ni el iPhone ni la
+tablet necesitan instalar nada.
 
-- Un subdominio de su web, por ejemplo `jarvis.sudominio.com`, apuntando a
-  la IP de casa (con DNS dinámico, porque la IP de casa cambia).
-- **Caddy** en el PC como proxy: pide el certificado HTTPS solo y reenvía a
-  `localhost:8000`. iOS exige HTTPS.
-- Abrir el puerto 443 del router hacia el PC.
+1. Tener Tailscale instalado y con sesión iniciada en el Mac (paso 1).
+2. Ejecutar `bash instalar.command`. La primera vez, Tailscale muestra en la
+   Terminal un enlace para activar Funnel: abrirlo, aceptar y volver a
+   ejecutar el instalador.
+3. El instalador apunta la dirección en `.env` (`PUBLIC_URL`) y la muestra al
+   final, con forma `https://nombre-del-mac.tailXXXX.ts.net`.
 
-En el resto de la guía, `https://jarvis.sudominio.com` es esa dirección y
-`TOKEN` es el valor de `JARVIS_API_TOKEN`.
+JARVIS solo escucha dentro del propio Mac; desde fuera únicamente se entra
+por esa dirección, y todo exige el token.
+
+En el resto de la guía, `TU_DIRECCIÓN` es esa dirección y `TOKEN` es el valor
+de `JARVIS_API_TOKEN` (los dos aparecen al final del instalador).
+
+*Alternativa con su dominio* (por ejemplo `jarvis.sudominio.com`): DNS
+dinámico hacia la IP de casa, Caddy en el Mac como proxy HTTPS hacia
+`127.0.0.1:8000` y el puerto 443 del router abierto hacia el Mac. Funciona
+igual, pero son tres piezas más que mantener.
 
 ## 7. Avisos al iPhone (JARVIS habla sin que le pregunten)
 
@@ -168,7 +201,7 @@ Repetir 6 veces
     Dictar texto   (idioma: Español (España), dejar de escuchar: tras una pausa)
     Si [Texto dictado] no tiene ningún valor → Detener este atajo
     Obtener contenido de URL
-        URL: https://jarvis.sudominio.com/api/ask
+        URL: TU_DIRECCIÓN/api/ask
         Método: POST
         Cabeceras: Authorization = Bearer TOKEN
         Cuerpo de la solicitud: JSON
@@ -214,7 +247,7 @@ Atajos → *Automatización* → **CarPlay** → *Se conecta* → *Ejecutar inme
 ```
 Obtener ubicación actual
 Obtener contenido de URL
-    URL: https://jarvis.sudominio.com/api/carplay/greeting?lat=[Latitud]&lon=[Longitud]
+    URL: TU_DIRECCIÓN/api/carplay/greeting?lat=[Latitud]&lon=[Longitud]
     Método: GET
     Cabeceras: Authorization = Bearer TOKEN
 (reproducir la voz de JARVIS)
@@ -233,7 +266,7 @@ Atajos → *Automatización* → **CarPlay** → *Se desconecta* → *Ejecutar i
 
 ```
 Esperar 60 segundos
-Obtener contenido de URL  https://jarvis.sudominio.com/api/car/status  (GET, misma cabecera)
+Obtener contenido de URL  TU_DIRECCIÓN/api/car/status  (GET, misma cabecera)
 Obtener valor del diccionario  locked
 Si [locked] es falso
     Mostrar notificación: "El coche está abierto. Ciérralo desde Mercedes me."
@@ -252,9 +285,11 @@ por voz.
 
 ## 9. El panel de la tablet
 
-En el PC: `iniciar_frontend.bat`. En la tablet (misma WiFi), abrir una vez
-`http://IP-DEL-PC:3000/?token=TOKEN`; el navegador recuerda el token.
-Desde fuera de casa: `?token=TOKEN&api=https://jarvis.sudominio.com`.
+No hay que arrancar nada aparte: el propio JARVIS sirve el panel. En la
+tablet, abrir una vez `TU_DIRECCIÓN/?token=TOKEN` (el instalador muestra el
+enlace completo al final); el navegador recuerda el token. Funciona en casa,
+en la oficina o donde sea, y por HTTPS, que el navegador exige para usar el
+micrófono.
 
 A la izquierda, la conversación (botón de micrófono). A la derecha, en vivo:
 tiempo; depósito, cierre y presión de cada rueda del coche; agenda de hoy;

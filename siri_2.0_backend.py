@@ -19,7 +19,7 @@ import openai
 from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 import base64
-import tempfile
+from pathlib import Path
 from typing import AsyncIterator, Optional
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -1264,22 +1264,8 @@ def _text_to_speech_sync(text: str) -> Optional[bytes]:
         record_voice(len(text))
         return audio
     except Exception as e:
+        # Sin audio, el iPhone lee el texto con la voz de Siri y la pantalla lo muestra.
         logger.error(f"ElevenLabs TTS error: {e}")
-
-    try:
-        import pyttsx3
-        engine = pyttsx3.init()
-        engine.setProperty('rate', 150)
-        engine.setProperty('volume', 1.0)
-        engine.setProperty('voice', 'spanish')
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
-            tmp_path = tmp.name
-        engine.save_to_file(text, tmp_path)
-        engine.runAndWait()
-        with open(tmp_path, 'rb') as f:
-            return f.read()
-    except Exception as e:
-        logger.error(f"pyttsx3 fallback error: {e}")
         return None
 
 # ── PROACTIVE SCHEDULER ───────────────────────────────────────────────────────
@@ -1965,13 +1951,21 @@ async def dashboard():
     }
 
 
+# ── PANEL DE LA TABLET ────────────────────────────────────────────────────────
+# El panel ya compilado se sirve desde aquí mismo: un solo programa, una sola
+# dirección (y así funciona igual en casa y a través de Tailscale). Va al final
+# para que todas las rutas /api, /ws y /health tengan prioridad.
+PANEL_DIR = Path(__file__).parent / "panel"
+if PANEL_DIR.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=PANEL_DIR, html=True), name="panel")
+
+
 if __name__ == "__main__":
     import uvicorn
-    print("""
-    ╔══════════════════════════════════════╗
-    ║       JARVIS 2.0 — Agente IA        ║
-    ║  WebSocket: ws://localhost:8000/ws  ║
-    ║  API:       http://localhost:8000   ║
-    ╚══════════════════════════════════════╝
-    """)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Por defecto solo escucha en el propio Mac: desde fuera se entra por
+    # Tailscale (o por el proxy HTTPS), nunca directamente por la red.
+    host = os.getenv("JARVIS_HOST", "127.0.0.1")
+    port = int(os.getenv("JARVIS_PORT", "8000"))
+    print(f"JARVIS escuchando en http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)

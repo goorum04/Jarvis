@@ -1,6 +1,5 @@
-// Dónde está el backend y con qué token se habla con él. Ambos se pueden
-// pasar una vez en la URL (?token=...&api=https://jarvis.sudominio.com) y
-// quedan recordados en este navegador.
+// Dónde está el backend y con qué token se habla con él. El token se pasa
+// una vez en la URL (?token=...) y queda recordado en este navegador.
 const params = new URLSearchParams(window.location.search);
 
 const remember = (param, key) => {
@@ -13,9 +12,13 @@ const remember = (param, key) => {
 
 export const token = remember('token', 'jarvis_token');
 
-export const apiBase = (
-  remember('api', 'jarvis_api') || `${window.location.protocol}//${window.location.hostname}:8000`
-).replace(/\/$/, '');
+// Normalmente el propio JARVIS sirve el panel, así que el backend está en la
+// misma dirección. Solo en desarrollo (npm start, puerto 3000) va aparte.
+const defaultApi = window.location.port === '3000'
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : window.location.origin;
+
+export const apiBase = (remember('api', 'jarvis_api') || defaultApi).replace(/\/$/, '');
 
 export const wsUrl = `${apiBase.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`;
 

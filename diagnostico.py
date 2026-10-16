@@ -31,6 +31,22 @@ def _result(name, status, detail, fix=""):
     return {"name": name, "status": status, "detail": detail, "fix": fix}
 
 
+def _env(name: str) -> str:
+    """Valor del .env, tratando como vacío el texto de ejemplo (sk-ant-..., sk_...)."""
+    value = os.getenv(name, "").strip()
+    return "" if value.endswith("...") else value
+
+
+def _short_error(e: Exception) -> str:
+    """Los SDK incluyen cabeceras HTTP enteras en el error: se deja solo lo útil."""
+    status = getattr(e, "status_code", None)
+    body = getattr(e, "body", None)
+    message = body.get("detail", {}).get("message") if isinstance(body, dict) and isinstance(body.get("detail"), dict) else None
+    if status:
+        return f"HTTP {status}" + (f": {message}" if message else "")
+    return str(e)[:200]
+
+
 def check_token():
     token = os.getenv("JARVIS_API_TOKEN", "")
     if not token:
@@ -45,10 +61,10 @@ def check_token():
 def check_claude():
     import anthropic
     model = os.getenv("JARVIS_MODEL", "claude-opus-5-5")
-    if not os.getenv("CLAUDE_API_KEY"):
+    if not _env("CLAUDE_API_KEY"):
         return _result("Claude (cerebro)", FALLO, "Falta CLAUDE_API_KEY.", "Créala en console.anthropic.com (guía, paso 1).")
     try:
-        anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY")).models.retrieve(model)
+        anthropic.Anthropic(api_key=_env("CLAUDE_API_KEY")).models.retrieve(model)
         return _result("Claude (cerebro)", OK, f"Clave válida, modelo {model} disponible.")
     except anthropic.AuthenticationError:
         return _result("Claude (cerebro)", FALLO, "La clave de Claude no es válida.", "Revisa CLAUDE_API_KEY.")
@@ -60,7 +76,7 @@ def check_claude():
 
 def check_voice():
     from elevenlabs.client import ElevenLabs
-    key = os.getenv("ELEVENLABS_API_KEY")
+    key = _env("ELEVENLABS_API_KEY")
     voice_id = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
     if not key:
         return _result("Voz (ElevenLabs)", AVISO, "Sin ELEVENLABS_API_KEY: JARVIS responde con la voz de Siri.",
@@ -69,7 +85,7 @@ def check_voice():
         voice = ElevenLabs(api_key=key).voices.get(voice_id)
         return _result("Voz (ElevenLabs)", OK, f"Clave válida, voz «{voice.name}».")
     except Exception as e:
-        return _result("Voz (ElevenLabs)", FALLO, f"Fallo con la clave o la voz {voice_id}: {e}",
+        return _result("Voz (ElevenLabs)", FALLO, f"Fallo con la clave o la voz {voice_id}: {_short_error(e)}",
                        "Revisa ELEVENLABS_API_KEY y ELEVENLABS_VOICE_ID.")
 
 
@@ -161,15 +177,16 @@ def check_public_url():
     import httpx
     url = os.getenv("PUBLIC_URL", "").rstrip("/")
     if not url:
-        return _result("Acceso desde fuera", APAGADO, "Sin PUBLIC_URL: no se puede comprobar.",
-                       "Pon en .env la dirección pública, p. ej. https://jarvis.sudominio.com (guía, paso 6).")
+        return _result("Acceso desde fuera", APAGADO, "Sin PUBLIC_URL: el iPhone no puede llegar a JARVIS.",
+                       "Instala Tailscale y vuelve a ejecutar instalar.command (guía, paso 6).")
     try:
         response = httpx.get(f"{url}/health", timeout=10)
         response.raise_for_status()
         return _result("Acceso desde fuera", OK, f"{url} responde con HTTPS.")
     except Exception as e:
-        return _result("Acceso desde fuera", FALLO, f"{url} no responde: {e}",
-                       "Revisa el subdominio, Caddy y el puerto 443 del router.")
+        return _result("Acceso desde fuera", FALLO, f"{url} no responde: {_short_error(e)}",
+                       "Con Tailscale: comprueba que está abierto y que Funnel sigue activo "
+                       "(tailscale funnel status). Con dominio propio: revisa el DNS, Caddy y el puerto 443.")
 
 
 def run_checks(send_test: bool = False) -> list[dict]:
