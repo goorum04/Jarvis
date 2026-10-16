@@ -7,6 +7,7 @@
 #   ./jarvis.sh logs          muestra el registro en directo (Ctrl+C para salir)
 #   ./jarvis.sh diagnostico   revisa cada pieza (añade --probar-avisos para un aviso de prueba)
 #   ./jarvis.sh google        conecta o reconecta Gmail, Calendar y Docs
+#   ./jarvis.sh llamadas      da de alta (o actualiza) el agente que llama por teléfono
 #   ./jarvis.sh actualizar    descarga la última versión y la instala
 #   ./jarvis.sh desinstalar   quita el arranque automático (no borra datos ni claves)
 
@@ -44,6 +45,9 @@ case "${1:-estado}" in
   google)
     "$PY" autorizar_google.py
     ;;
+  llamadas)
+    "$PY" crear_agente_llamadas.py && launchctl kickstart -k "$TARGET"
+    ;;
   actualizar)
     git pull --ff-only
     bash instalar.command
@@ -54,7 +58,7 @@ case "${1:-estado}" in
     echo "Arranque automático quitado. Los datos, el .env y las claves siguen en esta carpeta."
     ;;
   *)
-    sed -n '2,11p' "$0"
+    sed -n '2,12p' "$0"
     exit 1
     ;;
 esac

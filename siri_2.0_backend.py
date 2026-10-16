@@ -29,6 +29,7 @@ import car
 import google_services
 import maps
 import notifier
+import phone_calls
 import store
 import weather
 
@@ -47,7 +48,7 @@ CLAUDE_MODEL = os.getenv("JARVIS_MODEL", "claude-opus-5-5")
 # "medium" o "high" piensan más en peticiones complejas a cambio de latencia.
 CLAUDE_EFFORT = os.getenv("JARVIS_EFFORT", "low")
 OWNER_NAME = os.getenv("OWNER_NAME", "Nacho")
-TIMEZONE = os.getenv("TIMEZONE", "Europe/Madrid")
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Andorra")
 JARVIS_API_TOKEN = os.getenv("JARVIS_API_TOKEN")
 
 HOME_LAT = os.getenv("HOME_LAT")
@@ -68,6 +69,12 @@ TIRE_DIFF_BAR = float(os.getenv("TIRE_DIFF_BAR", "0.3"))
 TIRE_MIN_BAR = float(os.getenv("TIRE_MIN_BAR")) if os.getenv("TIRE_MIN_BAR") else None
 LEAVE_BUFFER_MINUTES = int(os.getenv("LEAVE_BUFFER_MINUTES", "10"))
 EMAIL_ALERTS = os.getenv("EMAIL_ALERTS", "1") == "1"
+
+# Llamadas en su nombre
+MAX_CALLS_PER_DAY = int(os.getenv("MAX_CALLS_PER_DAY", "5"))
+CALL_HOURS = os.getenv("CALL_HOURS", "09:00-22:00")
+# Teléfono que el agente puede dar si se lo piden (vacío = no da ninguno)
+OWNER_PHONE = os.getenv("OWNER_PHONE", "")
 
 # Informes diarios ("HH:MM", vacío = desactivado)
 BRIEFING_TIME = os.getenv("BRIEFING_TIME", "08:00")
@@ -487,6 +494,24 @@ TOOLS = [
             "required": ["period"]
         }
     },
+    # ── Llamadas en su nombre ──
+    {
+        "name": "prepare_phone_call",
+        "description": "Prepara una llamada de teléfono que hará un agente de voz en nombre de Nacho (reservar mesa, pedir cita, preguntar horarios o disponibilidad). NO llama todavía: después dile a quién vas a llamar, qué vas a pedir y con qué margen, y pregunta si llamas. Busca antes el teléfono en internet si no lo sabes. Pregúntale lo que falte (día, hora, personas, nombre) antes de prepararla. El resultado llegará como aviso al terminar.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "business_name": {"type": "string", "description": "A quién se llama, p. ej. 'Restaurante Borda Estevet'"},
+                "phone_number": {"type": "string", "description": "Teléfono, mejor con prefijo internacional (+376, +34, +33)"},
+                "task": {"type": "string", "description": "Qué hay que conseguir, con todos los datos: 'Reservar mesa para 4 personas el sábado 18 a las 21:00 a nombre de Nacho'"},
+                "opening_line": {"type": "string", "description": "Primera frase tras presentarse, natural y corta: 'Quería reservar una mesa para el sábado por la noche.'"},
+                "limits": {"type": "string", "description": "Qué alternativas se pueden aceptar: 'entre las 20:30 y las 21:30; terraza o interior da igual'. Si no hay margen, 'ninguno'."},
+                "calendar_title": {"type": "string", "description": "Si sale bien, título de la cita para su calendario (p. ej. 'Cena en Borda Estevet'). Vacío si no hace falta."},
+                "duration_minutes": {"type": "integer", "description": "Duración de esa cita en el calendario (por defecto 90)"}
+            },
+            "required": ["business_name", "phone_number", "task", "opening_line", "limits"]
+        }
+    },
     # ── Documentos y facturas ──
     {
         "name": "create_document",
@@ -589,6 +614,8 @@ def _confirm_pending(ctx: AgentContext) -> dict:
         result = google_services.delete_event(payload["event_id"])
         log_action("cita borrada", summary, ctx.channel)
         return result
+    if action["type"] == "phone_call":
+        return start_phone_call(payload, ctx)
     if action["type"] == "whatsapp":
         if not ctx.on_iphone:
             return {"error": "Desde aquí no se pueden enviar WhatsApp, solo desde el iPhone."}
@@ -693,6 +720,9 @@ def execute_integration_tool(name: str, inputs: dict, ctx: AgentContext) -> dict
     if name == "get_low_stock":
         return store.low_stock(LOW_STOCK_THRESHOLD)
 
+    if name == "prepare_phone_call":
+        return prepare_phone_call(inputs, ctx)
+
     if name == "create_document":
         result = google_services.create_document(inputs["title"], inputs["content"])
         log_action("documento creado", {"title": inputs["title"], "url": result["url"]}, ctx.channel)
@@ -714,7 +744,119 @@ INTEGRATION_TOOLS = {
     "get_car_status", "get_weather", "navigate_to", "get_travel_time", "call_contact",
     "run_iphone_shortcut", "get_store_sales", "get_pending_orders", "get_top_products",
     "search_conversations", "create_document", "read_email_attachments", "get_low_stock",
+    "prepare_phone_call",
 }
+
+
+# ── LLAMADAS EN SU NOMBRE ─────────────────────────────────────────────────────
+
+MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None  # se fija al arrancar
+CALL_POLL_SECONDS = 15
+CALL_FOLLOW_MAX_MINUTES = 15
+
+OUTCOME_TEXT = {
+    "confirmado": "hecho",
+    "no_disponible": "no había hueco dentro de lo que me dijiste",
+    "pendiente": "lo tienen que confirmar más tarde",
+    "sin_respuesta": "no lo han cogido (o saltó un contestador)",
+    "otro": "no ha quedado claro",
+}
+
+
+def _within_call_hours() -> bool:
+    start, end = CALL_HOURS.split("-")
+    now = datetime.now(ZoneInfo(TIMEZONE)).strftime("%H:%M")
+    return start <= now <= end
+
+
+def _calls_today() -> int:
+    return _today_usage().get("calls", 0)
+
+
+def prepare_phone_call(inputs: dict, ctx: AgentContext) -> dict:
+    if not phone_calls.is_configured():
+        return {"error": "Las llamadas todavía no están configuradas (falta el número y el agente de voz)."}
+    number = phone_calls.normalize_number(inputs["phone_number"])
+    if not number:
+        return {"error": f"No reconozco el teléfono '{inputs['phone_number']}'. Necesito el número completo, mejor con prefijo (+376, +34...)."}
+    if not _within_call_hours():
+        return {"error": f"Solo llamo a negocios entre las {CALL_HOURS.replace('-', ' y las ')}. Ofrécele un recordatorio para llamar más tarde."}
+    if _calls_today() >= MAX_CALLS_PER_DAY:
+        return {"error": f"Hoy ya he hecho {MAX_CALLS_PER_DAY} llamadas, el máximo diario."}
+    payload = {**inputs, "phone_number": number}
+    summary = {"business": inputs["business_name"], "phone": number, "task": inputs["task"], "limits": inputs["limits"]}
+    return _set_pending(ctx, "phone_call", payload, summary)
+
+
+def start_phone_call(payload: dict, ctx: AgentContext) -> dict:
+    variables = {
+        "owner_name": OWNER_NAME,
+        "business_name": payload["business_name"],
+        "task": payload["task"],
+        "limits": payload.get("limits") or "ninguno",
+        "opening_line": payload.get("opening_line", ""),
+        "callback_phone": OWNER_PHONE or "no hay; di que se pondrán en contacto con ellos",
+    }
+    conversation_id = phone_calls.start_call(payload["phone_number"], variables)
+    today = _today_usage()
+    today["calls"] = today.get("calls", 0) + 1
+    set_state(_usage_key(), today)
+    log_action("llamada en tu nombre", {"title": payload["business_name"], "task": payload["task"],
+                                         "phone": payload["phone_number"], "conversation_id": conversation_id}, ctx.channel)
+    if MAIN_LOOP:
+        future = asyncio.run_coroutine_threadsafe(follow_call(conversation_id, payload), MAIN_LOOP)
+        # Los errores de una tarea en segundo plano no salen solos: se registran.
+        future.add_done_callback(
+            lambda f: f.exception() and logger.error(f"Seguimiento de la llamada {conversation_id} falló: {f.exception()!r}")
+        )
+    return {"success": True, "note": "Llamando ahora. En cuanto cuelguen le aviso con el resultado."}
+
+
+def _call_report(business: str, result: dict) -> str:
+    text = f"Llamada a {business}: {OUTCOME_TEXT.get(result['outcome'], 'no ha quedado claro')}."
+    if result["confirmed_details"]:
+        text += f" {result['confirmed_details'].rstrip('.')}."
+    if result["notes"]:
+        text += f" {result['notes'].rstrip('.')}."
+    return text
+
+
+async def follow_call(conversation_id: str, payload: dict):
+    """Sigue la llamada hasta que termina y avisa del resultado; si quedó
+    confirmada, la apunta en el calendario."""
+    business = payload["business_name"]
+    result = None
+    for _ in range(int(CALL_FOLLOW_MAX_MINUTES * 60 / CALL_POLL_SECONDS)):
+        await asyncio.sleep(CALL_POLL_SECONDS)
+        try:
+            result = await asyncio.to_thread(phone_calls.call_result, conversation_id)
+        except Exception as e:
+            logger.error(f"Seguimiento de la llamada {conversation_id}: {e}")
+        if result:
+            break
+    if not result:
+        await alert("Llamada", f"No he podido saber cómo acabó la llamada a {business}. Puedes verla en ElevenLabs.")
+        return
+
+    text = _call_report(business, result)
+    if result["outcome"] == "confirmado" and result["event_start"] and payload.get("calendar_title") \
+            and google_services.is_configured():
+        try:
+            start = datetime.fromisoformat(result["event_start"])
+            end = start + timedelta(minutes=int(payload.get("duration_minutes") or 90))
+            await asyncio.to_thread(
+                google_services.create_event, payload["calendar_title"], start.strftime("%Y-%m-%dT%H:%M:%S"),
+                end.strftime("%Y-%m-%dT%H:%M:%S"), TIMEZONE, business, f"Reservado por JARVIS. {result['confirmed_details']}",
+            )
+            text += " Ya lo tienes en el calendario."
+        except Exception as e:
+            logger.error(f"No se pudo apuntar la llamada en el calendario: {e}")
+
+    log_action("resultado de llamada", {"title": business, "outcome": result["outcome"],
+                                         "details": result["confirmed_details"], "notes": result["notes"]}, "llamada")
+    # Queda en la memoria para "¿qué te dijeron del restaurante?"
+    save_exchange(f"[Resultado de la llamada a {business}]", text, "llamada")
+    await alert("Llamada", text, urgent=result["outcome"] == "confirmado")
 
 
 # ── ESTADO PERSISTENTE (ubicación, avisos ya enviados...) ─────────────────────
@@ -1117,8 +1259,10 @@ def build_system_prompt(user_input: str, ctx: AgentContext) -> str:
         "permiso para consultar. Busca en internet para noticias, resultados, horarios o cualquier "
         "dato actual, y resume lo encontrado en una o dos frases, sin leer enlaces. "
         "Desde el iPhone también puedes abrir la navegación, llamar y lanzar sus Atajos. "
+        "Además puedes hacer llamadas de teléfono en su nombre con un agente de voz (reservar mesa, pedir cita, "
+        "preguntar horarios): reúne antes todos los datos que hagan falta. "
         "Para tareas, recordatorios y notas usa las herramientas propias y confirma en pocas palabras. "
-        "Enviar correos, enviar WhatsApp o borrar citas va siempre en dos pasos: primero lo preparas "
+        "Enviar correos, enviar WhatsApp, llamar en su nombre o borrar citas va siempre en dos pasos: primero lo preparas "
         "y le dices en voz alta a quién va y qué dice; solo cuando en su siguiente mensaje diga que "
         "sí, llamas a confirm_pending_action. Nunca digas que algo está enviado si no lo has confirmado. "
         "Sus WhatsApp no los puedes leer: si te lo pide, dile que en el coche Siri se los lee con "
@@ -1127,6 +1271,8 @@ def build_system_prompt(user_input: str, ctx: AgentContext) -> str:
         "equipo, nombres de gente cercana, rutinas), guárdalo con remember_preference sin preguntar.\n\n"
         f"Ahora es {fecha}. {canal}"
     )
+    if HOME_CITY:
+        prompt += f" Vive en {HOME_CITY}: cuando busques sitios, teléfonos o planes, da prioridad a su zona."
     places = [f"casa: {HOME_ADDRESS}" if HOME_ADDRESS else "", f"oficina: {WORK_ADDRESS}" if WORK_ADDRESS else ""]
     if any(places):
         prompt += " Sus direcciones — " + "; ".join(p for p in places if p) + "."
@@ -1576,6 +1722,8 @@ scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
 @app.on_event("startup")
 async def startup():
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
     scheduler.add_job(check_reminders, "interval", seconds=30)
     scheduler.add_job(watch_departures, "interval", minutes=5)
     scheduler.add_job(watch_email, "interval", minutes=10)

@@ -131,6 +131,21 @@ def check_mercedes():
     ]
 
 
+def check_calls():
+    import phone_calls
+    if not phone_calls.is_configured():
+        return _result("Llamadas en su nombre", APAGADO, "Sin agente de voz ni número.",
+                       "Guía, paso 11: número de Twilio y ./jarvis.sh llamadas.")
+    try:
+        calls = phone_calls._client().conversational_ai
+        calls.agents.get(os.getenv("ELEVENLABS_AGENT_ID"))
+        number = calls.phone_numbers.get(os.getenv("ELEVENLABS_PHONE_NUMBER_ID"))
+        return _result("Llamadas en su nombre", OK, f"Agente listo; llama desde {getattr(number, 'phone_number', 'el número configurado')}.")
+    except Exception as e:
+        return _result("Llamadas en su nombre", FALLO, _short_error(e),
+                       "Vuelve a ejecutar ./jarvis.sh llamadas (revisa los datos de Twilio en .env).")
+
+
 def check_store():
     if not store.is_configured():
         return _result("Tienda online", APAGADO, "Sin conectar.", "Guía, paso 5.")
@@ -144,8 +159,8 @@ def check_store():
 def check_maps():
     if not maps.is_configured():
         return _result("Tráfico y rutas", APAGADO, "Sin GOOGLE_MAPS_API_KEY: no hay aviso de hora de salir.", "Guía, paso 3.")
-    origin = os.getenv("HOME_ADDRESS") or "Puerta del Sol, Madrid"
-    destination = os.getenv("WORK_ADDRESS") or "Plaza Mayor, Madrid"
+    origin = os.getenv("HOME_ADDRESS") or "Andorra la Vella"
+    destination = os.getenv("WORK_ADDRESS") or "Escaldes-Engordany"
     route = maps.travel_minutes(origin, destination)
     if not route:
         return _result("Tráfico y rutas", FALLO, "No se pudo calcular una ruta de prueba.",
@@ -191,7 +206,7 @@ def check_public_url():
 
 def run_checks(send_test: bool = False) -> list[dict]:
     checks: list[Callable] = [
-        check_token, check_claude, check_voice, check_google, check_mercedes, check_store,
+        check_token, check_claude, check_voice, check_google, check_mercedes, check_calls, check_store,
         check_maps, check_weather, lambda: check_notifications(send_test), check_public_url,
     ]
     results = []

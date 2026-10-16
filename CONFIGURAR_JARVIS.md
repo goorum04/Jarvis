@@ -5,7 +5,7 @@ y hablan a través de Siri y de Atajos de iOS; una tablet en casa u oficina
 hace de panel permanente. Esta guía cubre lo que hay que hacer una sola vez.
 
 Cada parte funciona por separado: si algo no está configurado, JARVIS
-simplemente no lo menciona. Orden recomendado: del 1 al 10.
+simplemente no lo menciona. Orden recomendado: del 1 al 11.
 
 **Después de cada paso**, ejecutar en el Mac:
 
@@ -43,7 +43,7 @@ en `TU_DIRECCIÓN/api/status` con el token.
    quiera; no borra nada.
 4. Rellenar en `.env` al menos `CLAUDE_API_KEY` y `ELEVENLABS_API_KEY`, y
    también `HOME_LAT`, `HOME_LON`, `HOME_ADDRESS` (casa) y `WORK_ADDRESS`
-   (oficina). Después: `./jarvis.sh reiniciar`.
+   (oficina). `TIMEZONE` y `HOME_CITY` ya vienen puestos para Andorra. Después: `./jarvis.sh reiniciar`.
 
 **El Mac tiene que estar encendido y despierto.** JARVIS impide que se duerma
 por inactividad mientras está en marcha. Con el portátil de Nacho en casa:
@@ -110,6 +110,11 @@ Los nombres exactos de los campos de esa API hay que confirmarlos con su
 documentación (ver el comentario al principio de `car.py`). Si alguno no
 coincide, el error queda en la consola del backend con el JSON que devuelve
 Mercedes, y se ajusta en un minuto.
+
+**Coche matriculado en Andorra:** antes de nada, comprobar que la app
+*Mercedes me* muestra el combustible y el cierre del C63. Si la app funciona
+con su coche, la API también; si los servicios conectados no están activos
+en Andorra para ese coche, esta parte no se podrá usar.
 
 ## 5. La tienda online
 
@@ -318,6 +323,41 @@ JARVIS tenga una voz suya (original: imitar la de un actor real no es legal):
 4. Escuchar las variantes, guardar la que más guste y copiar su **Voice ID**
    en `ELEVENLABS_VOICE_ID`.
 
+## 11. Llamadas en su nombre
+
+JARVIS puede llamar por teléfono para reservar mesa, pedir cita o preguntar
+horarios. Llama un agente de voz de ElevenLabs que empieza diciendo que es
+el asistente de inteligencia artificial de Nacho. Habla en castellano y
+cambia a catalán o francés si le contestan así.
+
+1. **Un número para JARVIS** en <https://www.twilio.com>: crear la cuenta y
+   comprar un número español (+34). Twilio no ofrece números de Andorra.
+   Para los números españoles piden datos de una dirección en España.
+   Copiar en `.env` el *Account SID*, el *Auth Token* y el número
+   (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, con +34).
+2. En el Mac: `./jarvis.sh llamadas`. Crea el agente en la cuenta de
+   ElevenLabs de Nacho (con su misma voz), le conecta el número, guarda los ID
+   en `.env` y reinicia JARVIS.
+3. `./jarvis.sh diagnostico` debe mostrar "Llamadas en su nombre: Agente listo".
+
+Cómo se usa: *"Resérvame mesa el sábado a las nueve en Borda Estevet para
+cuatro"*. JARVIS busca el teléfono, pregunta lo que falte y dice qué va a
+pedir y con qué margen (*"si no hay a las nueve, ¿te vale entre las ocho y
+media y las nueve y media?"*). Solo llama cuando Nacho dice que sí. Al
+colgar, avisa al iPhone con el resultado y, si quedó reservado, lo apunta en
+el calendario. Cada llamada queda en el registro.
+
+Límites: solo llama a negocios entre las 9:00 y las 22:00 (`CALL_HOURS`),
+como mucho 5 llamadas al día (`MAX_CALLS_PER_DAY`) y 5 minutos cada una. No
+acepta pagos ni señales ni da más datos que el nombre; el teléfono de
+contacto solo si se pone en `OWNER_PHONE`. Cada llamada cuesta unos céntimos
+por minuto, entre Twilio y ElevenLabs.
+
+**Con número andorrano:** si Andorra Telecom ofrece una línea SIP para su
+número, se da de alta en ElevenLabs (*Agents → Phone numbers → Import → SIP
+trunk*), se pone su ID en `ELEVENLABS_PHONE_NUMBER_ID` y `CALL_PROVIDER=sip_trunk`.
+JARVIS llamaría entonces con ese número.
+
 ## Protección
 
 - **Límite de gasto diario** (`DAILY_BUDGET_USD`, 10 $ por defecto): al
@@ -349,6 +389,9 @@ JARVIS tenga una voz suya (original: imitar la de un actor real no es legal):
   llegado la factura de la luz?".
 - **WhatsApp y llamadas** (desde el iPhone o el coche): "Dile a Marta que
   llego en diez minutos", "Llama a Laura".
+- **Llamadas que hace JARVIS por él**: "Resérvame mesa el sábado en Borda
+  Estevet para cuatro", "Pide cita en el taller para el martes por la mañana",
+  "Llama a la farmacia y pregunta si abren hoy".
 - **Tienda**: "¿Cuánto he vendido hoy?", "¿Y esta semana?", "¿Hay pedidos
   sin enviar?", "¿Qué es lo que más se vende este mes?", "¿Qué productos se
   están acabando?".
@@ -361,7 +404,7 @@ JARVIS tenga una voz suya (original: imitar la de un actor real no es legal):
 - **Memoria**: "Recuerda que el café lo tomo solo" (lo sabrá siempre),
   "¿Qué te dije ayer del taller?", "¿De qué hablamos el lunes?".
 
-Enviar correos, enviar WhatsApp y borrar citas van **siempre en dos pasos**:
+Enviar correos, enviar WhatsApp, llamar en su nombre y borrar citas van **siempre en dos pasos**:
 JARVIS lo prepara, lo lee en voz alta y solo lo ejecuta si Nacho responde
 que sí en el siguiente mensaje. El servidor lo impone: aunque el modelo se
 equivocara, no puede enviar nada en el mismo turno en que lo redacta.
