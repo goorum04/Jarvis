@@ -2,8 +2,9 @@
 JARVIS 2.0 - Backend con agente, memoria persistente y recordatorios proactivos
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import json
 import os
 import sqlite3
@@ -19,6 +20,8 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from rag import retrieve_context
+import car
+import weather
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -27,11 +30,34 @@ logger = logging.getLogger(__name__)
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")  # voz premade "George"
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Madrid")
+JARVIS_API_TOKEN = os.getenv("JARVIS_API_TOKEN")
+
+HOME_LAT = os.getenv("HOME_LAT")
+HOME_LON = os.getenv("HOME_LON")
+
+MERCEDES_CLIENT_ID = os.getenv("MERCEDES_CLIENT_ID")
+MERCEDES_CLIENT_SECRET = os.getenv("MERCEDES_CLIENT_SECRET")
+MERCEDES_REFRESH_TOKEN = os.getenv("MERCEDES_REFRESH_TOKEN")
+MERCEDES_VIN = os.getenv("MERCEDES_VIN")
+MERCEDES_CONFIGURED = all(
+    [MERCEDES_CLIENT_ID, MERCEDES_CLIENT_SECRET, MERCEDES_REFRESH_TOKEN, MERCEDES_VIN]
+)
 
 client_anthropic = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-client_openai = openai.OpenAI(api_key=OPENAI_API_KEY)
+client_openai = openai.OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 client_elevenlabs = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+
+
+def require_token(authorization: Optional[str] = Header(None)) -> None:
+    """Protege los endpoints REST que quedan expuestos a internet (Atajos de Siri, etc.)."""
+    if not JARVIS_API_TOKEN:
+        logger.warning("JARVIS_API_TOKEN no configurado — endpoint sin protección.")
+        return
+    expected = f"Bearer {JARVIS_API_TOKEN}"
+    if not authorization or authorization != expected:
+        raise HTTPException(status_code=401, detail="Token inválido o ausente")
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 
@@ -283,7 +309,7 @@ async def run_agent(user_input: str) -> str:
         "o cuando pregunte qué tiene pendiente. Confirma las acciones brevemente. Máximo 2-3 oraciones."
     )
 
-    context = retrieve_context(client_openai, user_input)
+    context = retrieve_context(client_openai, user_input) if client_openai else ""
     if context:
         system_prompt += (
             "\n\nUsa la siguiente información de los documentos del usuario para responder si es relevante "
@@ -293,7 +319,7 @@ async def run_agent(user_input: str) -> str:
 
     while True:
         response = client_anthropic.messages.create(
-            model="claude-opus-4-5",
+            model="claude-opus-5",
             max_tokens=500,
             system=system_prompt,
             tools=TOOLS,
@@ -324,11 +350,10 @@ async def run_agent(user_input: str) -> str:
 
 async def text_to_speech(text: str) -> Optional[bytes]:
     try:
-        audio_stream = client_elevenlabs.generate(
+        audio_stream = client_elevenlabs.text_to_speech.convert(
+            ELEVENLABS_VOICE_ID,
             text=text,
-            voice="George",
-            model="eleven_multilingual_v2",
-            stream=False
+            model_id="eleven_multilingual_v2",
         )
         return b"".join(audio_stream)
     except Exception as e:
@@ -392,6 +417,9 @@ async def shutdown():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if JARVIS_API_TOKEN and websocket.query_params.get("token") != JARVIS_API_TOKEN:
+        await websocket.close(code=1008)
+        return
     await manager.connect(websocket)
     logger.info("Cliente conectado")
     try:
@@ -429,11 +457,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ── REST ENDPOINTS ────────────────────────────────────────────────────────────
 
+class AskRequest(BaseModel):
+    text: str
+
+
 @app.get("/health")
 async def health():
     return {"status": "online", "service": "JARVIS 2.0"}
 
-@app.get("/api/tasks")
+@app.get("/api/tasks", dependencies=[Depends(require_token)])
 async def get_tasks():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -443,7 +475,7 @@ async def get_tasks():
     conn.close()
     return {"tasks": tasks}
 
-@app.get("/api/reminders")
+@app.get("/api/reminders", dependencies=[Depends(require_token)])
 async def get_reminders():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -452,6 +484,81 @@ async def get_reminders():
     reminders = [dict(r) for r in c.fetchall()]
     conn.close()
     return {"reminders": reminders}
+
+# ── ATAJOS DE SIRI ────────────────────────────────────────────────────────────
+
+@app.post("/api/ask", dependencies=[Depends(require_token)])
+async def ask(request: AskRequest):
+    """Para el Atajo 'Oye Siri, JARVIS': manda la pregunta ya transcrita por Siri
+    y devuelve la respuesta en texto y audio para que el Atajo la reproduzca."""
+    user_text = request.text.strip()
+    if not user_text:
+        raise HTTPException(status_code=400, detail="texto vacío")
+    ai_response = await run_agent(user_text)
+    audio_bytes = await text_to_speech(ai_response)
+    return {
+        "text": ai_response,
+        "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
+        "audio_type": "audio/mp3",
+    }
+
+
+def _get_fuel_status() -> Optional[dict]:
+    if not MERCEDES_CONFIGURED:
+        return None
+    return car.get_fuel_status(
+        MERCEDES_VIN, MERCEDES_CLIENT_ID, MERCEDES_CLIENT_SECRET, MERCEDES_REFRESH_TOKEN
+    )
+
+
+def _get_lock_status() -> Optional[bool]:
+    if not MERCEDES_CONFIGURED:
+        return None
+    return car.get_lock_status(
+        MERCEDES_VIN, MERCEDES_CLIENT_ID, MERCEDES_CLIENT_SECRET, MERCEDES_REFRESH_TOKEN
+    )
+
+
+@app.get("/api/car/status", dependencies=[Depends(require_token)])
+async def car_status():
+    """Estado crudo del coche, para que el Atajo decida si avisa de que está abierto."""
+    fuel = _get_fuel_status()
+    return {
+        "locked": _get_lock_status(),
+        "fuel_percent": fuel["fuel_percent"] if fuel else None,
+        "range_km": fuel["range_km"] if fuel else None,
+    }
+
+
+@app.get("/api/carplay/greeting", dependencies=[Depends(require_token)])
+async def carplay_greeting():
+    """Para la automatización 'al conectar CarPlay': frase de bienvenida con lo
+    que realmente se pudo consultar (combustible/autonomía y clima). Si algo no
+    está configurado o falla, simplemente se omite esa parte — nunca se inventa."""
+    parts = []
+    hour = datetime.now().hour
+    saludo = "Buenos días" if hour < 13 else ("Buenas tardes" if hour < 21 else "Buenas noches")
+    parts.append(saludo + ", Nacho.")
+
+    fuel = _get_fuel_status()
+    if fuel:
+        parts.append(
+            f"Depósito al {fuel['fuel_percent']:.0f}%, "
+            f"unos {fuel['range_km']:.0f} km de autonomía."
+        )
+
+    if HOME_LAT and HOME_LON:
+        temp = weather.get_current_temperature(float(HOME_LAT), float(HOME_LON))
+        if temp is not None:
+            parts.append(f"Fuera hacen {temp:.0f} grados.")
+
+    text = " ".join(parts)
+    audio_bytes = await text_to_speech(text)
+    return {
+        "text": text,
+        "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
+        "audio_type": "audio/mp3",
+    }
 
 if __name__ == "__main__":
     import uvicorn
