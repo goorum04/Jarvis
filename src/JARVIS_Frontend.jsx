@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import DashboardPanel from './DashboardPanel';
+import { wsUrl } from './config';
 
 const JARVIS = () => {
   // Estados
@@ -7,14 +9,14 @@ const JARVIS = () => {
   const [status, setStatus] = useState('ready');
   const [transcript, setTranscript] = useState('');
   const [response, setResponse] = useState('');
-  const [useGPT, setUseGPT] = useState(false);
   const [history, setHistory] = useState([]);
+  // Cambia cuando JARVIS termina de hablar: el panel se refresca por si algo cambió.
+  const [refreshKey, setRefreshKey] = useState(0);
   const [waveIntensity, setWaveIntensity] = useState(0);
 
   // Referencias
   const wsRef = useRef(null);
   const recognitionRef = useRef(null);
-  const audioRef = useRef(null);
   const animationRef = useRef(null);
   // Ref para evitar closure obsoleto en onend de SpeechRecognition
   const transcriptRef = useRef('');
@@ -37,18 +39,11 @@ const JARVIS = () => {
         clearInterval(animationRef.current);
       }
     };
+    // Solo al montar: conectar una vez el WebSocket y el reconocimiento de voz.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const initializeWebSocket = () => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // El token se pasa una vez como ?token=... en la URL y se recuerda en este navegador.
-    const urlToken = new URLSearchParams(window.location.search).get('token');
-    if (urlToken) {
-      localStorage.setItem('jarvis_token', urlToken);
-    }
-    const token = urlToken || localStorage.getItem('jarvis_token') || '';
-    const wsUrl = `${wsProtocol}//${window.location.hostname}:8000/ws?token=${encodeURIComponent(token)}`;
-
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
@@ -77,6 +72,7 @@ const JARVIS = () => {
         case 'response_done':
           responseDoneRef.current = true;
           setHistory(prev => [...prev, { type: 'user', text: transcriptRef.current }, { type: 'assistant', text: responseTextRef.current }]);
+          setRefreshKey(k => k + 1);
           if (!playingRef.current) {
             setStatus('ready');
           }
@@ -88,9 +84,12 @@ const JARVIS = () => {
         case 'proactive_reminder':
           setResponse(data.text);
           setStatus('reminder');
+          setRefreshKey(k => k + 1);
           if (data.audio) {
             enqueueAudio(data.audio);
           }
+          break;
+        default:
           break;
       }
     };
@@ -168,8 +167,7 @@ const JARVIS = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: 'audio',
-        text: text || transcript,
-        use_gpt: useGPT
+        text: text || transcript
       }));
       setStatus('processing');
     }
@@ -281,14 +279,15 @@ const JARVIS = () => {
 
       {/* Contenedor principal */}
       <div style={styles.mainContainer}>
-        {/* Parte superior - Interfaz holográfica */}
+        <div style={styles.contentRow}>
+        {/* Izquierda - Interfaz holográfica */}
         <div style={styles.holographicDisplay}>
           <div style={styles.header}>
             <div style={{ ...styles.statusIndicator, backgroundColor: getStatusColor() }}></div>
             <h1 style={styles.title}>⬤ J.A.R.V.I.S</h1>
             <div style={styles.headerInfo}>
               <span style={styles.version}>v2.0</span>
-              <span style={styles.model}>{useGPT ? 'GPT-4' : 'Claude 3.5'}</span>
+              <span style={styles.model}>Claude</span>
             </div>
           </div>
 
@@ -352,11 +351,15 @@ const JARVIS = () => {
                   <span style={{ opacity: 0.6 }}>
                     {msg.type === 'user' ? '→ TÚ: ' : '⬤ JARVIS: '}
                   </span>
-                  {msg.text.substring(0, 50)}...
+                  {msg.text.length > 80 ? `${msg.text.substring(0, 80)}…` : msg.text}
                 </div>
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Derecha - Panel con el día de Nacho */}
+        <DashboardPanel refreshKey={refreshKey} />
         </div>
 
         {/* Parte inferior - Controles */}
@@ -375,30 +378,6 @@ const JARVIS = () => {
               {isListening ? '🎤' : '🎧'}
             </span>
           </button>
-
-          {/* Toggle GPT/Claude */}
-          <div style={styles.toggleContainer}>
-            <button
-              onClick={() => setUseGPT(false)}
-              style={{
-                ...styles.toggleButton,
-                backgroundColor: !useGPT ? '#00d4ff' : '#1a1a2e',
-                color: !useGPT ? '#0a0a0a' : '#00d4ff'
-              }}
-            >
-              CLAUDE
-            </button>
-            <button
-              onClick={() => setUseGPT(true)}
-              style={{
-                ...styles.toggleButton,
-                backgroundColor: useGPT ? '#00d4ff' : '#1a1a2e',
-                color: useGPT ? '#0a0a0a' : '#00d4ff'
-              }}
-            >
-              GPT-4
-            </button>
-          </div>
 
           {/* Estado */}
           <div style={styles.statusContainer}>
@@ -502,9 +481,16 @@ const styles = {
     width: '100%',
     height: '100%'
   },
+  contentRow: {
+    flex: 1,
+    display: 'flex',
+    gap: '30px',
+    flexWrap: 'wrap',
+    minHeight: 0
+  },
   mainContainer: {
-    width: '90%',
-    maxWidth: '1000px',
+    width: '94%',
+    maxWidth: '1400px',
     height: '90%',
     background: 'linear-gradient(135deg, rgba(26,26,46,0.8) 0%, rgba(10,10,20,0.9) 100%)',
     border: '2px solid #00d4ff',
@@ -519,6 +505,7 @@ const styles = {
   },
   holographicDisplay: {
     flex: 1,
+    minWidth: '320px',
     display: 'flex',
     flexDirection: 'column',
     gap: '15px',
