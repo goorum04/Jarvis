@@ -3,6 +3,10 @@ __pycache__/
 .env
 jarvis_memory.db
 
+# Credenciales y permiso de Google: nunca al repositorio
+google_credentials.json
+google_token.json
+
 # RAG: los documentos y el índice son propios de cada instalación/cliente
 docs/*
 !docs/.gitkeep

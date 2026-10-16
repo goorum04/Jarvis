@@ -10,7 +10,9 @@ import json
 import os
 import re
 import sqlite3
-from datetime import datetime, date
+from dataclasses import dataclass, field
+from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import anthropic
 import openai
@@ -24,6 +26,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from rag import retrieve_context
 import car
+import google_services
 import weather
 
 load_dotenv()
@@ -213,12 +216,282 @@ TOOLS = [
             },
             "required": ["key"]
         }
+    },
+    # ── Correo (Gmail) ──
+    {
+        "name": "check_email",
+        "description": "Lista los correos sin leer de la bandeja principal (sin promociones ni redes sociales): remitente, asunto y un extracto. Úsalo cuando pregunte si tiene correo o qué le ha llegado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_results": {"type": "integer", "description": "Cuántos listar (por defecto 5)"}
+            }
+        }
+    },
+    {
+        "name": "search_email",
+        "description": "Busca correos con la sintaxis de búsqueda de Gmail (p. ej. 'from:banco', 'subject:factura newer_than:7d'). Sirve también para encontrar la dirección de alguien a quien quiera escribir.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Consulta de búsqueda de Gmail"},
+                "max_results": {"type": "integer", "description": "Cuántos devolver (por defecto 5)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "read_email",
+        "description": "Lee el contenido completo de un correo (y lo marca como leído). Resúmelo en voz alta en una o dos frases salvo que pida que se lo leas entero.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string", "description": "id del correo, de check_email o search_email"}
+            },
+            "required": ["email_id"]
+        }
+    },
+    {
+        "name": "prepare_email_reply",
+        "description": "Prepara una respuesta a un correo, SIN enviarla. Después lee en voz alta a quién va y lo que dice, y pregunta si lo envías. Solo se envía si en su siguiente mensaje lo confirma (confirm_pending_action).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string", "description": "id del correo al que se responde"},
+                "body": {"type": "string", "description": "Texto de la respuesta, ya redactado y listo para enviar"}
+            },
+            "required": ["email_id", "body"]
+        }
+    },
+    {
+        "name": "prepare_new_email",
+        "description": "Prepara un correo nuevo, SIN enviarlo. Si no conoces la dirección, búscala antes con search_email. Después lee el destinatario y el texto y pregunta si lo envías.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Dirección de correo del destinatario"},
+                "subject": {"type": "string", "description": "Asunto"},
+                "body": {"type": "string", "description": "Texto del correo"}
+            },
+            "required": ["to", "subject", "body"]
+        }
+    },
+    # ── WhatsApp ──
+    {
+        "name": "prepare_whatsapp",
+        "description": "Prepara un WhatsApp para un contacto de su iPhone, SIN enviarlo. Después dile a quién va y lo que dice, y pregunta si lo envías. Solo funciona cuando habla desde el iPhone. No puedes leer sus WhatsApp, solo enviarlos.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "contact_name": {"type": "string", "description": "Nombre del contacto tal como lo tendría en la agenda del iPhone"},
+                "text": {"type": "string", "description": "Texto del mensaje"}
+            },
+            "required": ["contact_name", "text"]
+        }
+    },
+    # ── Confirmación de envíos ──
+    {
+        "name": "confirm_pending_action",
+        "description": "Ejecuta lo que preparaste en el turno anterior (correo, WhatsApp o borrar una cita). Llámalo SOLO si en este mensaje confirma claramente ('sí', 'envíalo', 'adelante').",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "cancel_pending_action",
+        "description": "Descarta lo que tenías preparado, si dice que no o que lo deje.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    # ── Agenda (Google Calendar) ──
+    {
+        "name": "get_calendar_events",
+        "description": "Citas de su Google Calendar. Por defecto, las de hoy. Para mañana usa days_ahead=1; para la semana, days=7.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days_ahead": {"type": "integer", "description": "Desde qué día empezar: 0 = hoy, 1 = mañana..."},
+                "days": {"type": "integer", "description": "Cuántos días incluir (por defecto 1)"}
+            }
+        }
+    },
+    {
+        "name": "create_calendar_event",
+        "description": "Crea una cita en su Google Calendar. Si no dice cuánto dura, ponle una hora. Confirma después en pocas palabras qué has agendado y cuándo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Título de la cita"},
+                "start": {"type": "string", "description": "Inicio, hora local, formato YYYY-MM-DDTHH:MM:SS"},
+                "end": {"type": "string", "description": "Fin, hora local, formato YYYY-MM-DDTHH:MM:SS"},
+                "location": {"type": "string", "description": "Lugar (opcional)"},
+                "description": {"type": "string", "description": "Notas (opcional)"}
+            },
+            "required": ["title", "start", "end"]
+        }
+    },
+    {
+        "name": "prepare_delete_calendar_event",
+        "description": "Prepara borrar una cita de su calendario, SIN borrarla. Di cuál es y pregunta si la borras.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "description": "id de la cita, de get_calendar_events"},
+                "title": {"type": "string", "description": "Título de la cita, para confirmarlo en voz alta"}
+            },
+            "required": ["event_id", "title"]
+        }
+    },
+    # ── Coche y entorno ──
+    {
+        "name": "get_car_status",
+        "description": "Estado real de su Mercedes: nivel de combustible, autonomía en km y si está cerrado. Úsalo cuando pregunte por gasolina, autonomía o si cerró el coche.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_weather",
+        "description": "Temperatura actual en su zona.",
+        "input_schema": {"type": "object", "properties": {}}
     }
 ]
 
+# ── CONTEXTO DE CADA PETICIÓN Y ACCIONES PENDIENTES ───────────────────────────
+
+@dataclass
+class AgentContext:
+    channel: str  # "iphone" (Atajos de Siri) o "pantalla" (interfaz holográfica)
+    can_send_whatsapp: bool = False
+    turn: int = 0
+    client_actions: list = field(default_factory=list)
+    awaiting_confirmation: bool = False
+
+
+PENDING_TTL_SECONDS = 300
+pending_action: Optional[dict] = None
+agent_turn = 0
+
+
+def _set_pending(ctx: AgentContext, action_type: str, payload: dict, summary: dict) -> dict:
+    global pending_action
+    pending_action = {
+        "type": action_type,
+        "payload": payload,
+        "summary": summary,
+        "turn": ctx.turn,
+        "created": datetime.now(),
+    }
+    ctx.awaiting_confirmation = True
+    return {"prepared": True, "not_sent_yet": True, **summary,
+            "next_step": "Léeselo en voz alta y pregunta si lo envías/ejecutas."}
+
+
+def current_pending(turn: int) -> Optional[dict]:
+    """Lo preparado en el turno inmediatamente anterior. Exigir que haya un mensaje
+    del usuario en medio garantiza que nada se envía sin que él lo haya oído."""
+    if not pending_action:
+        return None
+    if pending_action["turn"] != turn - 1:
+        return None
+    if datetime.now() - pending_action["created"] > timedelta(seconds=PENDING_TTL_SECONDS):
+        return None
+    return pending_action
+
+
+def _confirm_pending(ctx: AgentContext) -> dict:
+    global pending_action
+    action = current_pending(ctx.turn)
+    if not action:
+        pending_action = None
+        return {"error": "No hay nada preparado pendiente de confirmar (o ha caducado). Prepáralo de nuevo."}
+
+    pending_action = None
+    payload = action["payload"]
+    if action["type"] == "email_reply":
+        return google_services.reply(payload["email_id"], payload["body"])
+    if action["type"] == "email_new":
+        return google_services.send(payload["to"], payload["subject"], payload["body"])
+    if action["type"] == "calendar_delete":
+        return google_services.delete_event(payload["event_id"])
+    if action["type"] == "whatsapp":
+        if not ctx.can_send_whatsapp:
+            return {"error": "Desde aquí no se pueden enviar WhatsApp, solo desde el iPhone."}
+        ctx.client_actions.append({"type": "send_whatsapp", **payload})
+        return {"success": True, "note": "El iPhone lo está enviando ahora."}
+    return {"error": f"Acción desconocida: {action['type']}"}
+
+
+def _car_status() -> dict:
+    if not MERCEDES_CONFIGURED:
+        return {"error": "La conexión con el Mercedes todavía no está configurada."}
+    fuel = _get_fuel_status()
+    locked = _get_lock_status()
+    if fuel is None and locked is None:
+        return {"error": "No he podido consultar el coche ahora mismo."}
+    return {
+        "fuel_percent": fuel["fuel_percent"] if fuel else None,
+        "range_km": fuel["range_km"] if fuel else None,
+        "locked": locked,
+    }
+
+
+def execute_integration_tool(name: str, inputs: dict, ctx: AgentContext) -> dict:
+    global pending_action
+    if name == "check_email":
+        return google_services.list_unread(inputs.get("max_results", 5))
+    if name == "search_email":
+        return google_services.search(inputs["query"], inputs.get("max_results", 5))
+    if name == "read_email":
+        return google_services.read(inputs["email_id"])
+    if name == "prepare_email_reply":
+        preview = google_services.reply_preview(inputs["email_id"])
+        return _set_pending(ctx, "email_reply", inputs, {**preview, "body": inputs["body"]})
+    if name == "prepare_new_email":
+        return _set_pending(ctx, "email_new", inputs, inputs)
+    if name == "prepare_whatsapp":
+        if not ctx.can_send_whatsapp:
+            return {"error": "Los WhatsApp solo se pueden enviar cuando habla desde el iPhone."}
+        payload = {"contact": inputs["contact_name"], "text": inputs["text"]}
+        return _set_pending(ctx, "whatsapp", payload, payload)
+    if name == "confirm_pending_action":
+        return _confirm_pending(ctx)
+    if name == "cancel_pending_action":
+        pending_action = None
+        return {"success": True}
+    if name == "get_calendar_events":
+        return google_services.events_for_days(TIMEZONE, inputs.get("days_ahead", 0), inputs.get("days", 1))
+    if name == "create_calendar_event":
+        return google_services.create_event(
+            inputs["title"], inputs["start"], inputs["end"], TIMEZONE,
+            inputs.get("location"), inputs.get("description"),
+        )
+    if name == "prepare_delete_calendar_event":
+        return _set_pending(ctx, "calendar_delete", {"event_id": inputs["event_id"]}, {"title": inputs["title"]})
+    if name == "get_car_status":
+        return _car_status()
+    if name == "get_weather":
+        if not (HOME_LAT and HOME_LON):
+            return {"error": "No tengo configurada la ubicación para el tiempo."}
+        temp = weather.get_current_temperature(float(HOME_LAT), float(HOME_LON))
+        return {"temperature_c": temp} if temp is not None else {"error": "No he podido consultar el tiempo."}
+    return {"error": f"Herramienta desconocida: {name}"}
+
+
+INTEGRATION_TOOLS = {
+    "check_email", "search_email", "read_email", "prepare_email_reply", "prepare_new_email",
+    "prepare_whatsapp", "confirm_pending_action", "cancel_pending_action",
+    "get_calendar_events", "create_calendar_event", "prepare_delete_calendar_event",
+    "get_car_status", "get_weather",
+}
+
 # ── TOOL EXECUTORS ────────────────────────────────────────────────────────────
 
-def execute_tool(name: str, inputs: dict) -> dict:
+def execute_tool(name: str, inputs: dict, ctx: AgentContext) -> dict:
+    if name in INTEGRATION_TOOLS:
+        try:
+            return execute_integration_tool(name, inputs, ctx)
+        except google_services.GoogleNotConfigured as e:
+            return {"error": str(e)}
+        except Exception as e:
+            logger.error(f"Error en tool {name}: {e}")
+            return {"error": f"Ha fallado {name}: {e}"}
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -365,9 +638,14 @@ def load_preferences() -> list[tuple[str, str]]:
     return rows
 
 
-def build_system_prompt(user_input: str) -> str:
-    now = datetime.now()
+def build_system_prompt(user_input: str, ctx: AgentContext) -> str:
+    now = datetime.now(ZoneInfo(TIMEZONE))
     fecha = f"{DIAS[now.weekday()]} {now.day} de {MESES[now.month - 1]} de {now.year}, {now:%H:%M}"
+    canal = (
+        "Te habla desde el iPhone o el coche a través de Siri: puedes enviar WhatsApp."
+        if ctx.channel == "iphone"
+        else "Te habla desde la pantalla de casa u oficina: desde aquí no se pueden enviar WhatsApp."
+    )
 
     prompt = (
         f"Eres JARVIS, el asistente personal de {OWNER_NAME}. Hablas español de España con un tono "
@@ -377,12 +655,28 @@ def build_system_prompt(user_input: str) -> str:
         f"y llámale {OWNER_NAME} de vez en cuando, sin abusar. "
         "Nunca inventes datos sobre su agenda, su coche, su correo o sus cosas: si no tienes el dato, "
         "dilo con naturalidad. "
-        "Usa las herramientas cuando quiera guardar tareas, recordatorios o notas, o pregunte qué "
-        "tiene pendiente, y confirma las acciones en pocas palabras. "
+        "No cierres con preguntas de cortesía como '¿algo más?': pregunta solo cuando necesites "
+        "una respuesta suya. "
+        "Tienes acceso a su Gmail, su Google Calendar, su Mercedes y el tiempo; úsalos sin pedir "
+        "permiso para consultar. Para tareas, recordatorios y notas usa las herramientas propias y "
+        "confirma en pocas palabras. "
+        "Enviar correos, enviar WhatsApp o borrar citas va siempre en dos pasos: primero lo preparas "
+        "y le dices en voz alta a quién va y qué dice; solo cuando en su siguiente mensaje diga que "
+        "sí, llamas a confirm_pending_action. Nunca digas que algo está enviado si no lo has confirmado. "
+        "Sus WhatsApp no los puedes leer: si te lo pide, dile que en el coche Siri se los lee con "
+        "'Oye Siri, lee mis mensajes'. "
         "Cuando te cuente una preferencia o un dato personal estable (cómo le gusta el café, su "
         "equipo, nombres de gente cercana, rutinas), guárdalo con remember_preference sin preguntar.\n\n"
-        f"Ahora es {fecha}."
+        f"Ahora es {fecha}. {canal}"
     )
+
+    pending = current_pending(ctx.turn)
+    if pending:
+        prompt += (
+            "\n\nEn tu mensaje anterior preparaste esto y le preguntaste si seguir adelante: "
+            f"{json.dumps({'tipo': pending['type'], **pending['summary']}, ensure_ascii=False)}. "
+            "Si ahora lo confirma, llama a confirm_pending_action; si dice que no, a cancel_pending_action."
+        )
 
     preferences = load_preferences()
     if preferences:
@@ -400,11 +694,15 @@ def build_system_prompt(user_input: str) -> str:
     return prompt
 
 
-async def stream_agent(user_input: str) -> AsyncIterator[str]:
+async def stream_agent(user_input: str, ctx: AgentContext) -> AsyncIterator[str]:
     """Genera la respuesta frase a frase según llega de Claude, ejecutando las
     herramientas que pida por el camino."""
+    global agent_turn
+    agent_turn += 1
+    ctx.turn = agent_turn
+
     messages = [*conversation_history[-10:], {"role": "user", "content": user_input}]
-    system_prompt = build_system_prompt(user_input)
+    system_prompt = build_system_prompt(user_input, ctx)
     spoken = []
 
     while True:
@@ -442,7 +740,8 @@ async def stream_agent(user_input: str) -> AsyncIterator[str]:
                     {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
                 )
                 logger.info(f"Tool: {block.name} → {block.input}")
-                result = execute_tool(block.name, block.input)
+                # En un hilo: Gmail, Calendar y Mercedes hacen llamadas de red bloqueantes.
+                result = await asyncio.to_thread(execute_tool, block.name, block.input, ctx)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -456,8 +755,8 @@ async def stream_agent(user_input: str) -> AsyncIterator[str]:
     add_to_history("assistant", " ".join(spoken))
 
 
-async def run_agent(user_input: str) -> str:
-    return " ".join([sentence async for sentence in stream_agent(user_input)])
+async def run_agent(user_input: str, ctx: AgentContext) -> str:
+    return " ".join([sentence async for sentence in stream_agent(user_input, ctx)])
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
 
@@ -547,7 +846,7 @@ async def stream_response(websocket: WebSocket, user_text: str):
 
     async def produce():
         try:
-            async for sentence in stream_agent(user_text):
+            async for sentence in stream_agent(user_text, AgentContext(channel="pantalla")):
                 await queue.put((sentence, asyncio.create_task(text_to_speech(sentence))))
         finally:
             await queue.put(None)
@@ -638,12 +937,17 @@ async def ask(request: AskRequest):
     user_text = request.text.strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="texto vacío")
-    ai_response = await run_agent(user_text)
+    ctx = AgentContext(channel="iphone", can_send_whatsapp=True)
+    ai_response = await run_agent(user_text, ctx)
     audio_bytes = await text_to_speech(ai_response)
     return {
         "text": ai_response,
         "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
         "audio_type": "audio/mp3",
+        # El Atajo vuelve a escuchar si JARVIS ha hecho una pregunta o espera un "sí".
+        "expects_reply": ctx.awaiting_confirmation or ai_response.rstrip().endswith("?"),
+        # Lo que el Atajo tiene que hacer en el iPhone, p. ej. enviar un WhatsApp ya confirmado.
+        "client_action": ctx.client_actions[-1] if ctx.client_actions else None,
     }
 
 
@@ -666,35 +970,70 @@ def _get_lock_status() -> Optional[bool]:
 @app.get("/api/car/status", dependencies=[Depends(require_token)])
 async def car_status():
     """Estado crudo del coche, para que el Atajo decida si avisa de que está abierto."""
-    fuel = _get_fuel_status()
+    fuel, locked = await asyncio.gather(
+        asyncio.to_thread(_get_fuel_status), asyncio.to_thread(_get_lock_status)
+    )
     return {
-        "locked": _get_lock_status(),
+        "locked": locked,
         "fuel_percent": fuel["fuel_percent"] if fuel else None,
         "range_km": fuel["range_km"] if fuel else None,
     }
 
 
+async def _safe(func, *args):
+    """Ejecuta una consulta bloqueante en un hilo; si falla, None en vez de romper el saludo."""
+    try:
+        return await asyncio.to_thread(func, *args)
+    except Exception as e:
+        logger.error(f"Saludo: fallo en {func.__name__}: {e}")
+        return None
+
+
+def _calendar_today() -> Optional[dict]:
+    """{'event': próxima cita o None} si se pudo consultar; None si no hay calendario."""
+    if not google_services.is_configured():
+        return None
+    return {"event": google_services.next_event_today(TIMEZONE)}
+
+
+def _temperature() -> Optional[float]:
+    if not (HOME_LAT and HOME_LON):
+        return None
+    return weather.get_current_temperature(float(HOME_LAT), float(HOME_LON))
+
+
 @app.get("/api/carplay/greeting", dependencies=[Depends(require_token)])
 async def carplay_greeting():
     """Para la automatización 'al conectar CarPlay': frase de bienvenida con lo
-    que realmente se pudo consultar (combustible/autonomía y clima). Si algo no
-    está configurado o falla, simplemente se omite esa parte — nunca se inventa."""
-    parts = []
-    hour = datetime.now().hour
-    saludo = "Buenos días" if hour < 13 else ("Buenas tardes" if hour < 21 else "Buenas noches")
-    parts.append(f"{saludo}, {OWNER_NAME}.")
+    que realmente se pudo consultar (combustible, tiempo, próxima cita y correos).
+    Si algo no está configurado o falla, se omite esa parte: nunca se inventa."""
+    tz = ZoneInfo(TIMEZONE)
+    hour = datetime.now(tz).hour
+    saludo = "Buenos días" if 6 <= hour < 13 else ("Buenas tardes" if 13 <= hour < 21 else "Buenas noches")
+    parts = [f"{saludo}, {OWNER_NAME}."]
 
-    fuel = _get_fuel_status()
+    fuel, temp, calendar, unread = await asyncio.gather(
+        _safe(_get_fuel_status),
+        _safe(_temperature),
+        _safe(_calendar_today),
+        _safe(google_services.count_unread),
+    )
+
     if fuel:
         parts.append(
             f"Depósito al {fuel['fuel_percent']:.0f}%, "
             f"unos {fuel['range_km']:.0f} km de autonomía."
         )
-
-    if HOME_LAT and HOME_LON:
-        temp = weather.get_current_temperature(float(HOME_LAT), float(HOME_LON))
-        if temp is not None:
-            parts.append(f"Fuera hacen {temp:.0f} grados.")
+    if temp is not None:
+        parts.append(f"Fuera hacen {temp:.0f} grados.")
+    if calendar and calendar["event"]:
+        event = calendar["event"]
+        start = datetime.fromisoformat(event["start"]).astimezone(tz)
+        parts.append(f"Tu próxima cita es a las {start:%H:%M}: {event['title']}.")
+    elif calendar:
+        parts.append("Hoy no tienes más citas.")
+    if unread:
+        parts.append(f"Tienes {unread} correo{'s' if unread != 1 else ''} sin leer.")
 
     text = " ".join(parts)
     audio_bytes = await text_to_speech(text)
