@@ -2106,9 +2106,21 @@ async def dashboard():
 # El panel ya compilado se sirve desde aquí mismo: un solo programa, una sola
 # dirección (y así funciona igual en casa y a través de Tailscale). Va al final
 # para que todas las rutas /api, /ws y /health tengan prioridad.
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+# Página pública que explica el proyecto (la «URL de propósito» que pide Mercedes).
+PROYECTO_DIR = Path(__file__).parent / "proyecto"
+if PROYECTO_DIR.is_dir():
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/proyecto", include_in_schema=False)
+    async def proyecto_sin_barra():
+        return RedirectResponse("/proyecto/")
+
+    app.mount("/proyecto", StaticFiles(directory=PROYECTO_DIR, html=True), name="proyecto")
+
 PANEL_DIR = Path(__file__).parent / "panel"
 if PANEL_DIR.is_dir():
-    from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=PANEL_DIR, html=True), name="panel")
 
 

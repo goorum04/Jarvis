@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JARVIS — asistente personal privado</title>
+  <meta name="description" content="Asistente de voz privado y de uso personal que consulta los datos del vehículo de su propio titular.">
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5b6475; --line: #e3e6eb; --accent: #0a6cbd;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0e1116; --card: #161b22; --text: #e6e9ef; --muted: #9aa4b2; --line: #262d38; --accent: #58a6ff; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 40px 20px;
+    }
+    main { max-width: 720px; margin: 0 auto; }
+    header { margin-bottom: 28px; }
+    h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: 0.5px; }
+    .subtitle { color: var(--muted); margin: 0; }
+    section {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 20px 24px; margin-bottom: 16px;
+    }
+    h2 { font-size: 18px; margin: 0 0 10px; }
+    ul { margin: 0; padding-left: 20px; }
+    li { margin: 4px 0; }
+    p { margin: 0 0 8px; }
+    p:last-child { margin-bottom: 0; }
+    .en { color: var(--muted); font-size: 14px; }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>JARVIS</h1>
+    <p class="subtitle">Asistente de voz privado, de uso personal y no comercial.</p>
+  </header>
+
+  <section>
+    <h2>Qué es</h2>
+    <p>
+      JARVIS es un asistente de voz para uso exclusivo del titular de un vehículo. Funciona en su
+      propio ordenador y le responde a través de su iPhone y de CarPlay. Le ayuda con su agenda, su correo y su
+      día a día, y le avisa de cosas importantes de su coche.
+    </p>
+    <p>No es un producto ni un servicio para otras personas: tiene un único usuario y un único vehículo.</p>
+  </section>
+
+  <section>
+    <h2>Qué datos del vehículo consulta</h2>
+    <p>Solo los de su propio vehículo, con su consentimiento expreso y únicamente estos:</p>
+    <ul>
+      <li>Nivel de combustible y autonomía.</li>
+      <li>Estado de cierre del vehículo.</li>
+      <li>Presión de los neumáticos.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Para qué</h2>
+    <ul>
+      <li>Decirle por voz, al subir al coche, cuánto combustible y autonomía le quedan.</li>
+      <li>Avisarle en el iPhone si queda poco combustible.</li>
+      <li>Avisarle si, al salir, el coche se ha quedado abierto.</li>
+      <li>Avisarle si un neumático pierde presión.</li>
+    </ul>
+    <p style="margin-top:10px">El asistente solo consulta datos: no envía órdenes al vehículo.</p>
+  </section>
+
+  <section>
+    <h2>Privacidad</h2>
+    <ul>
+      <li>Los datos se guardan únicamente en el ordenador del propio titular.</li>
+      <li>Para responderle por voz, el asistente usa servicios de inteligencia artificial y de síntesis de voz,
+        que procesan cada respuesta en el momento de dársela.</li>
+      <li>No se venden ni se ceden a terceros para ningún otro fin.</li>
+      <li>No se usan con fines comerciales, publicitarios ni de perfilado.</li>
+      <li>El titular puede retirar el acceso en cualquier momento desde su cuenta de Mercedes me.</li>
+    </ul>
+  </section>
+
+  <section class="en" lang="en">
+    <h2>In English</h2>
+    <p>
+      JARVIS is a private, non-commercial voice assistant for the exclusive use of a vehicle owner. It reads only
+      that owner's own vehicle's fuel level and range, lock status and tyre pressure, with their explicit consent, to remind
+      them by voice and on their iPhone (low fuel, car left unlocked, tyre losing pressure). It is read-only, has a
+      single user and a single vehicle, and stores data only on the owner's own computer. To answer by voice it
+      relies on AI and text-to-speech services that process each reply as it is given; data is never sold or
+      passed on to third parties for any other purpose. Access can be revoked at any time from the owner's Mercedes me account.
+    </p>
+  </section>
+
+  <footer>Proyecto personal · Uso privado y no comercial</footer>
+</main>
+</body>
+</html>
