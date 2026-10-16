@@ -46,13 +46,16 @@ en `TU_DIRECCIÓN/api/status` con el token.
    (oficina). Después: `./jarvis.sh reiniciar`.
 
 **El Mac tiene que estar encendido y despierto.** JARVIS impide que se duerma
-por inactividad mientras está en marcha, pero:
-- Si es un **portátil**: tiene que estar enchufado y con la tapa abierta (o
-  cerrada solo si tiene una pantalla externa conectada). Si Nacho se lo lleva
-  o lo cierra, JARVIS deja de responder y de avisar hasta que lo abra.
-- Lo ideal es un **Mac mini** que se quede fijo en casa u oficina, siempre encendido.
-- *Ajustes del Sistema → Batería (o Ahorro de energía) → Opciones*: activar
-  "Arrancar automáticamente tras un corte de corriente".
+por inactividad mientras está en marcha. Con el portátil de Nacho en casa:
+- **Enchufado y con la tapa abierta.** La pantalla puede apagarse sola, eso
+  da igual. Al cerrar la tapa el Mac se duerme y ningún programa lo evita
+  (salvo con una pantalla externa conectada).
+- **Los días que se lo lleve**, JARVIS no responde mientras el portátil vaya
+  cerrado: Siri dirá que hubo un problema con el atajo. No se pierde nada: al
+  abrirlo, JARVIS sigue solo, los recordatorios pendientes saltan en ese
+  momento y el informe de la mañana se envía si aún es por la mañana.
+- Si algún día hace falta que funcione siempre, aunque se lleve el portátil,
+  la carpeta se puede pasar tal cual a un Mac mini o a un servidor en la nube.
 
 Comandos del día a día: `./jarvis.sh estado | reiniciar | logs | parar |
 arrancar | diagnostico | google | actualizar`.

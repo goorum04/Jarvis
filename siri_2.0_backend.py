@@ -1582,10 +1582,13 @@ async def startup():
     scheduler.add_job(watch_fuel, "interval", minutes=30)
     scheduler.add_job(watch_tires, "interval", minutes=30)
     scheduler.add_job(watch_store, "interval", minutes=15)
-    for when, job in ((BRIEFING_TIME, morning_briefing), (STORE_CLOSE_TIME, store_closing)):
+    # Si el Mac estaba dormido a esa hora, el informe sale al despertar (si no
+    # han pasado más de unas horas) en vez de perderse.
+    for when, job, grace_hours in ((BRIEFING_TIME, morning_briefing, 4), (STORE_CLOSE_TIME, store_closing, 2)):
         if when:
             hour, minute = when.split(":")
-            scheduler.add_job(job, "cron", hour=int(hour), minute=int(minute))
+            scheduler.add_job(job, "cron", hour=int(hour), minute=int(minute),
+                              misfire_grace_time=grace_hours * 3600, coalesce=True)
     scheduler.start()
     logger.info("Vigilancia iniciada: recordatorios, hora de salir, correo importante y gasolina")
     if not notifier.is_configured():
