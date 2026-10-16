@@ -17,6 +17,12 @@ const time = (iso, timeZone) => {
 const money = (amount, currency) =>
   new Intl.NumberFormat('es-ES', { style: 'currency', currency: currency || 'EUR' }).format(amount || 0);
 
+const TIRE_ORDER = [['front_left', 'DI'], ['front_right', 'DD'], ['rear_left', 'TI'], ['rear_right', 'TD']];
+
+// Una línea legible para cada acción del registro.
+const describeAction = (d) =>
+  d.title || d.subject || (d.contact && d.text ? `${d.contact} · ${d.text}` : d.contact) || d.to || d.name || '';
+
 const Card = ({ title, children, accent = '#00d4ff', testId, grow = false }) => (
   <div style={{ ...styles.card, ...(grow ? { flex: 1 } : {}), borderColor: `${accent}55` }} data-testid={testId}>
     <div style={{ ...styles.cardTitle, color: accent }}>{title}</div>
@@ -61,7 +67,8 @@ const DashboardPanel = ({ refreshKey }) => {
     );
   }
 
-  const { weather, car, calendar, email, store, tasks, timezone } = data;
+  const { weather, car, calendar, email, store, tasks, actions, budget, timezone } = data;
+  const tireProblems = (car && car.tire_problems) || [];
 
   return (
     <div style={styles.panel} data-testid="dashboard">
@@ -72,7 +79,12 @@ const DashboardPanel = ({ refreshKey }) => {
           </Card>
         )}
         {car && (
-          <Card title="MERCEDES" accent={car.locked === false ? '#ff3333' : '#00ff00'} testId="card-car" grow>
+          <Card
+            title="MERCEDES"
+            accent={car.locked === false || tireProblems.length ? '#ff3333' : '#00ff00'}
+            testId="card-car"
+            grow
+          >
             {car.fuel_percent != null && (
               <>
                 <div style={styles.big}>{Math.round(car.fuel_percent)}%</div>
@@ -87,6 +99,18 @@ const DashboardPanel = ({ refreshKey }) => {
                 {car.locked ? 'Cerrado' : 'ABIERTO'}
               </div>
             )}
+            {car.tire_pressure_bar && (
+              <div style={styles.tires} data-testid="tires">
+                {TIRE_ORDER.map(([key, label]) => (
+                  <span key={key}>
+                    {label} {car.tire_pressure_bar[key] != null ? car.tire_pressure_bar[key].toFixed(1).replace('.', ',') : '—'}
+                  </span>
+                ))}
+              </div>
+            )}
+            {tireProblems.map((p) => (
+              <div key={p} style={{ color: '#ff3333', fontSize: 12 }}>⚠ {p}</div>
+            ))}
           </Card>
         )}
       </div>
@@ -150,7 +174,19 @@ const DashboardPanel = ({ refreshKey }) => {
         </Card>
       )}
 
+      {actions && actions.length > 0 && (
+        <Card title="HECHO EN TU NOMBRE" accent="#ff00ff" testId="card-actions">
+          {actions.slice(0, 6).map((a, i) => (
+            <div key={i} style={styles.row}>
+              <span style={styles.rowTime}>{a.created_at.substring(11, 16)}</span>
+              <span style={styles.ellipsis}>{a.kind}: {describeAction(a.details)}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
       <div style={styles.updated}>
+        {budget && `Gasto de hoy ${budget.usd.toFixed(2).replace('.', ',')} $ de ${budget.limit_usd} $ · `}
         Actualizado {time(data.updated_at, timezone)}
         {error && ' · sin conexión'}
       </div>
@@ -222,6 +258,14 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  tires: {
+    display: 'flex',
+    gap: '10px',
+    flexWrap: 'wrap',
+    fontSize: '12px',
+    marginTop: '6px',
+    opacity: 0.85,
   },
   muted: {
     opacity: 0.6,

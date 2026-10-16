@@ -142,6 +142,64 @@ def top_products(period: str, timezone: str, limit: int = 5) -> dict:
     return {"period": period, "products": [{"name": n, "units": u} for n, u in units.most_common(limit)]}
 
 
+def orders_between(start: datetime, end: datetime) -> list[dict]:
+    _check()
+    return _orders_between(start, end)
+
+
+def _woo_products() -> list[dict]:
+    base = os.getenv("WOO_URL", "").rstrip("/")
+    auth = (os.getenv("WOO_CONSUMER_KEY", ""), os.getenv("WOO_CONSUMER_SECRET", ""))
+    products, page = [], 1
+    while page <= MAX_PAGES:
+        response = httpx.get(
+            f"{base}/wp-json/wc/v3/products",
+            params={"status": "publish", "per_page": 100, "page": page,
+                    "_fields": "id,name,manage_stock,stock_quantity"},
+            auth=auth, timeout=20,
+        )
+        response.raise_for_status()
+        for p in response.json():
+            if p.get("manage_stock") and p.get("stock_quantity") is not None:
+                products.append({"name": p.get("name"), "stock": int(p["stock_quantity"])})
+        if page >= int(response.headers.get("X-WP-TotalPages", "1")):
+            break
+        page += 1
+    return products
+
+
+def _shopify_products() -> list[dict]:
+    shop = os.getenv("SHOPIFY_SHOP", "").replace("https://", "").rstrip("/")
+    version = os.getenv("SHOPIFY_API_VERSION", "2025-07")
+    headers = {"X-Shopify-Access-Token": os.getenv("SHOPIFY_ACCESS_TOKEN", "")}
+    url = f"https://{shop}/admin/api/{version}/products.json"
+    query = {"status": "active", "limit": 250, "fields": "title,variants"}
+    products = []
+    for _ in range(MAX_PAGES):
+        response = httpx.get(url, params=query, headers=headers, timeout=20)
+        response.raise_for_status()
+        for p in response.json().get("products", []):
+            for v in p.get("variants", []):
+                if v.get("inventory_management") and v.get("inventory_quantity") is not None:
+                    variant = v.get("title")
+                    name = p.get("title") if variant in (None, "Default Title") else f"{p.get('title')} ({variant})"
+                    products.append({"name": name, "stock": int(v["inventory_quantity"])})
+        next_link = response.links.get("next", {}).get("url")
+        if not next_link:
+            break
+        url, query = next_link, {}
+    return products
+
+
+def low_stock(threshold: int) -> dict:
+    """Productos con control de stock y pocas unidades (incluidos los agotados).
+    En WooCommerce no incluye las variaciones de los productos variables."""
+    _check()
+    products = _shopify_products() if platform() == "shopify" else _woo_products()
+    low = sorted((p for p in products if p["stock"] <= threshold), key=lambda p: p["stock"])
+    return {"threshold": threshold, "products": low}
+
+
 def pending_orders(limit: int = 5) -> dict:
     """Pedidos pagados y sin enviar, los más antiguos primero."""
     _check()

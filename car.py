@@ -11,7 +11,8 @@ Requisitos para que esto funcione:
    MERCEDES_CLIENT_SECRET y MERCEDES_VIN.
 
 IMPORTANTE: los nombres de recurso usados abajo (fuelstatus, doorlockstatus,
-fuelLevelPercent, rangeLiquid, doorLockStatusOverall) son los más comunes en
+fuelLevelPercent, rangeLiquid, doorLockStatusOverall, tires,
+tirepressurefrontleft...) son los más comunes en
 la documentación pública de Mercedes, pero hay que confirmarlos contra la
 documentación real una vez tengas acceso — pueden variar según mercado o
 tipo de suscripción. Si un campo no encaja, revisa el JSON crudo que
@@ -60,14 +61,15 @@ def _get_access_token(client_id: str, client_secret: str, refresh_token: str) ->
 
 
 def _get_resource(
-    vin: str, resource: str, client_id: str, client_secret: str, refresh_token: str
+    vin: str, resource: str, client_id: str, client_secret: str, refresh_token: str,
+    kind: str = "resources",
 ) -> Optional[dict]:
     token = _get_access_token(client_id, client_secret, refresh_token)
     if not token:
         return None
     try:
         response = httpx.get(
-            f"{API_BASE}/vehicles/{vin}/resources/{resource}",
+            f"{API_BASE}/vehicles/{vin}/{kind}/{resource}",
             headers={"Authorization": f"Bearer {token}"},
             timeout=10,
         )
@@ -93,6 +95,53 @@ def get_fuel_status(
     except (KeyError, TypeError) as e:
         logger.error(f"Formato inesperado en fuelstatus de Mercedes: {e} — datos: {data}")
         return None
+
+
+TIRES = {
+    "front_left": "tirepressurefrontleft",
+    "front_right": "tirepressurefrontright",
+    "rear_left": "tirepressurerearleft",
+    "rear_right": "tirepressurerearright",
+}
+TIRE_WARNING = "tirewarningprw"
+
+
+def _flatten(data) -> dict:
+    """Mercedes devuelve los recursos como {nombre: {"value": ...}} o como una
+    lista de esos diccionarios, según la API: se aceptan las dos formas."""
+    items = data if isinstance(data, list) else [data]
+    flat = {}
+    for item in items:
+        if isinstance(item, dict):
+            for key, value in item.items():
+                flat[key.lower()] = value.get("value") if isinstance(value, dict) else value
+    return flat
+
+
+def get_tire_status(
+    vin: str, client_id: str, client_secret: str, refresh_token: str
+) -> Optional[dict]:
+    """Presión de cada rueda en bar y si el coche marca aviso de presión.
+    None si no se pudo consultar."""
+    data = _get_resource(vin, "tires", client_id, client_secret, refresh_token, kind="containers")
+    if not data:
+        return None
+    flat = _flatten(data)
+    try:
+        # Mercedes da la presión en kPa: 100 kPa = 1 bar.
+        pressures = {wheel: round(float(flat[name]) / 100, 2) for wheel, name in TIRES.items() if flat.get(name) is not None}
+    except (TypeError, ValueError) as e:
+        logger.error(f"Formato inesperado en la presión de neumáticos: {e} — datos: {data}")
+        return None
+    if not pressures:
+        logger.error(f"Sin datos de presión de neumáticos en la respuesta de Mercedes: {data}")
+        return None
+    warning = flat.get(TIRE_WARNING)
+    return {
+        "bar": pressures,
+        # Cualquier valor distinto de 0/false/"0" se trata como aviso encendido.
+        "warning": str(warning).lower() not in ("0", "false", "none", "") if warning is not None else None,
+    }
 
 
 def get_lock_status(

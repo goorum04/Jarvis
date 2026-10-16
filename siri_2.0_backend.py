@@ -62,8 +62,21 @@ IPHONE_SHORTCUTS = [s.strip() for s in os.getenv("IPHONE_SHORTCUTS", "").split("
 
 # Avisos proactivos
 FUEL_ALERT_PERCENT = float(os.getenv("FUEL_ALERT_PERCENT", "15"))
+# Rueda baja: si está esta diferencia por debajo de la más alta, o por debajo
+# del mínimo (opcional; la presión correcta del C63 viene en el marco de la puerta).
+TIRE_DIFF_BAR = float(os.getenv("TIRE_DIFF_BAR", "0.3"))
+TIRE_MIN_BAR = float(os.getenv("TIRE_MIN_BAR")) if os.getenv("TIRE_MIN_BAR") else None
 LEAVE_BUFFER_MINUTES = int(os.getenv("LEAVE_BUFFER_MINUTES", "10"))
 EMAIL_ALERTS = os.getenv("EMAIL_ALERTS", "1") == "1"
+
+# Informes diarios ("HH:MM", vacío = desactivado)
+BRIEFING_TIME = os.getenv("BRIEFING_TIME", "08:00")
+STORE_CLOSE_TIME = os.getenv("STORE_CLOSE_TIME", "21:30")
+
+# Vigilancia de la tienda
+BIG_ORDER_AMOUNT = float(os.getenv("BIG_ORDER_AMOUNT", "500"))
+STALE_ORDER_DAYS = int(os.getenv("STALE_ORDER_DAYS", "2"))
+LOW_STOCK_THRESHOLD = int(os.getenv("LOW_STOCK_THRESHOLD", "3"))
 CLASSIFIER_MODEL = os.getenv("CLASSIFIER_MODEL", "claude-haiku-5-5")
 
 MERCEDES_CLIENT_ID = os.getenv("MERCEDES_CLIENT_ID")
@@ -126,6 +139,15 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
+            channel TEXT,
+            created_at DATETIME NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS actions_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            details TEXT NOT NULL,
             channel TEXT,
             created_at DATETIME NOT NULL
         )
@@ -376,7 +398,7 @@ TOOLS = [
     # ── Coche y entorno ──
     {
         "name": "get_car_status",
-        "description": "Estado real de su Mercedes: nivel de combustible, autonomía en km y si está cerrado. Úsalo cuando pregunte por gasolina, autonomía o si cerró el coche.",
+        "description": "Estado real de su Mercedes: nivel de combustible, autonomía en km, si está cerrado y la presión de cada neumático en bar (con los problemas detectados). Úsalo cuando pregunte por gasolina, autonomía, ruedas o si cerró el coche.",
         "input_schema": {"type": "object", "properties": {}}
     },
     {
@@ -450,6 +472,11 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}}
     },
     {
+        "name": "get_low_stock",
+        "description": "Productos de la tienda que se están acabando o están agotados.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
         "name": "get_top_products",
         "description": "Productos más vendidos de la tienda en un periodo.",
         "input_schema": {
@@ -458,6 +485,30 @@ TOOLS = [
                 "period": {"type": "string", "enum": ["today", "yesterday", "week", "month"]}
             },
             "required": ["period"]
+        }
+    },
+    # ── Documentos y facturas ──
+    {
+        "name": "create_document",
+        "description": "Crea un documento de Google Docs en su Drive (presupuestos, cartas, resúmenes, actas...) y devuelve el enlace. Redacta el contenido completo y bien escrito; usa '# ' y '## ' para títulos y '- ' para listas. Después dile en una frase que está creado; si quiere enviarlo, prepara un correo o WhatsApp con el enlace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Título del documento"},
+                "content": {"type": "string", "description": "Contenido completo del documento"}
+            },
+            "required": ["title", "content"]
+        }
+    },
+    {
+        "name": "read_email_attachments",
+        "description": "Lee el texto de los PDF adjuntos de un correo (facturas, presupuestos, contratos). Para '¿cuánto le he pagado a X este mes?', busca antes con search_email ('from:X has:attachment newer_than:30d'), lee los adjuntos y suma los importes, diciendo de cuántas facturas sale la cifra.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email_id": {"type": "string", "description": "id del correo"}
+            },
+            "required": ["email_id"]
         }
     },
     # ── Memoria ──
@@ -525,16 +576,24 @@ def _confirm_pending(ctx: AgentContext) -> dict:
 
     pending_action = None
     payload = action["payload"]
+    summary = action["summary"]
     if action["type"] == "email_reply":
-        return google_services.reply(payload["email_id"], payload["body"])
+        result = google_services.reply(payload["email_id"], payload["body"])
+        log_action("correo respondido", {"to": summary.get("to"), "subject": summary.get("subject"), "body": payload["body"]}, ctx.channel)
+        return result
     if action["type"] == "email_new":
-        return google_services.send(payload["to"], payload["subject"], payload["body"])
+        result = google_services.send(payload["to"], payload["subject"], payload["body"])
+        log_action("correo enviado", payload, ctx.channel)
+        return result
     if action["type"] == "calendar_delete":
-        return google_services.delete_event(payload["event_id"])
+        result = google_services.delete_event(payload["event_id"])
+        log_action("cita borrada", summary, ctx.channel)
+        return result
     if action["type"] == "whatsapp":
         if not ctx.on_iphone:
             return {"error": "Desde aquí no se pueden enviar WhatsApp, solo desde el iPhone."}
         ctx.client_actions.append({"type": "send_whatsapp", **payload})
+        log_action("WhatsApp enviado", payload, ctx.channel)
         return {"success": True, "note": "El iPhone lo está enviando ahora."}
     return {"error": f"Acción desconocida: {action['type']}"}
 
@@ -544,12 +603,15 @@ def _car_status() -> dict:
         return {"error": "La conexión con el Mercedes todavía no está configurada."}
     fuel = _get_fuel_status()
     locked = _get_lock_status()
-    if fuel is None and locked is None:
+    tires = _get_tire_status()
+    if fuel is None and locked is None and tires is None:
         return {"error": "No he podido consultar el coche ahora mismo."}
     return {
         "fuel_percent": fuel["fuel_percent"] if fuel else None,
         "range_km": fuel["range_km"] if fuel else None,
         "locked": locked,
+        "tire_pressure_bar": tires["bar"] if tires else None,
+        "tire_problems": tire_problems(tires),
     }
 
 
@@ -579,10 +641,12 @@ def execute_integration_tool(name: str, inputs: dict, ctx: AgentContext) -> dict
     if name == "get_calendar_events":
         return google_services.events_for_days(TIMEZONE, inputs.get("days_ahead", 0), inputs.get("days", 1))
     if name == "create_calendar_event":
-        return google_services.create_event(
+        result = google_services.create_event(
             inputs["title"], inputs["start"], inputs["end"], TIMEZONE,
             inputs.get("location"), inputs.get("description"),
         )
+        log_action("cita creada", {"title": inputs["title"], "start": inputs["start"]}, ctx.channel)
+        return result
     if name == "prepare_delete_calendar_event":
         return _set_pending(ctx, "calendar_delete", {"event_id": inputs["event_id"]}, {"title": inputs["title"]})
     if name == "get_car_status":
@@ -604,11 +668,13 @@ def execute_integration_tool(name: str, inputs: dict, ctx: AgentContext) -> dict
         return {"success": True, "note": "La navegación se abre ahora en el iPhone/CarPlay."}
     if name == "call_contact":
         ctx.client_actions.append({"type": "call", "contact": inputs["contact_name"]})
+        log_action("llamada", {"contact": inputs["contact_name"]}, ctx.channel)
         return {"success": True, "note": "El iPhone está llamando."}
     if name == "run_iphone_shortcut":
         if inputs["name"] not in IPHONE_SHORTCUTS:
             return {"error": f"Ese Atajo no está en la lista permitida: {', '.join(IPHONE_SHORTCUTS) or 'ninguno'}."}
         ctx.client_actions.append({"type": "run_shortcut", "name": inputs["name"]})
+        log_action("Atajo lanzado", {"name": inputs["name"]}, ctx.channel)
         return {"success": True}
 
     if name == "get_travel_time":
@@ -624,6 +690,15 @@ def execute_integration_tool(name: str, inputs: dict, ctx: AgentContext) -> dict
         return store.pending_orders()
     if name == "get_top_products":
         return store.top_products(inputs["period"], TIMEZONE)
+    if name == "get_low_stock":
+        return store.low_stock(LOW_STOCK_THRESHOLD)
+
+    if name == "create_document":
+        result = google_services.create_document(inputs["title"], inputs["content"])
+        log_action("documento creado", {"title": inputs["title"], "url": result["url"]}, ctx.channel)
+        return result
+    if name == "read_email_attachments":
+        return google_services.read_attachments(inputs["email_id"])
 
     if name == "search_conversations":
         return search_conversations(inputs.get("query"), inputs.get("day"))
@@ -638,7 +713,7 @@ INTEGRATION_TOOLS = {
     "get_calendar_events", "create_calendar_event", "prepare_delete_calendar_event",
     "get_car_status", "get_weather", "navigate_to", "get_travel_time", "call_contact",
     "run_iphone_shortcut", "get_store_sales", "get_pending_orders", "get_top_products",
-    "search_conversations",
+    "search_conversations", "create_document", "read_email_attachments", "get_low_stock",
 }
 
 
@@ -659,6 +734,122 @@ def set_state(key: str, value) -> None:
     )
     conn.commit()
     conn.close()
+
+
+# ── REGISTRO DE ACCIONES HECHAS EN SU NOMBRE ──────────────────────────────────
+
+def log_action(kind: str, details: dict, channel: Optional[str] = None) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO actions_log (kind, details, channel, created_at) VALUES (?, ?, ?, ?)",
+        (kind, json.dumps(details, ensure_ascii=False, default=str), channel,
+         datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    conn.commit()
+    conn.close()
+
+
+def recent_actions(limit: int = 15) -> list[dict]:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT kind, details, channel, created_at FROM actions_log ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [{**dict(r), "details": json.loads(r["details"])} for r in rows]
+
+
+# ── LÍMITE DE GASTO ───────────────────────────────────────────────────────────
+
+# Dólares por millón de tokens (entrada, salida, lectura de caché), precios de la
+# API de Anthropic en octubre de 2026. Si cambian, se ajustan aquí; un modelo que
+# no esté en la tabla se cuenta al precio de Opus para no quedarse corto.
+MODEL_PRICES = {
+    "claude-opus-5-5": (4.00, 20.00, 0.20),
+    "claude-opus-5": (5.00, 25.00, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00, 0.20),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+}
+WEB_SEARCH_USD = 10.00 / 1000
+DAILY_BUDGET_USD = float(os.getenv("DAILY_BUDGET_USD", "10"))
+DAILY_VOICE_CHARS = int(os.getenv("DAILY_VOICE_CHARS", "30000"))
+
+
+def _usage_key() -> str:
+    return f"usage:{datetime.now(ZoneInfo(TIMEZONE)):%Y-%m-%d}"
+
+
+def _today_usage() -> dict:
+    return get_state(_usage_key(), {"usd": 0.0, "voice_chars": 0, "alerted": False})
+
+
+def record_usage(model: str, usage) -> None:
+    """Suma lo que ha costado (aproximadamente) una llamada a Claude."""
+    if usage is None:
+        return
+    price_in, price_out, price_cache = MODEL_PRICES.get(model, MODEL_PRICES["claude-opus-5-5"])
+    get = lambda name: getattr(usage, name, 0) or 0
+    server = getattr(usage, "server_tool_use", None)
+    searches = (getattr(server, "web_search_requests", 0) or 0) if server else 0
+    cost = (
+        get("input_tokens") * price_in
+        + get("cache_creation_input_tokens") * price_in * 1.25
+        + get("cache_read_input_tokens") * price_cache
+        + get("output_tokens") * price_out
+    ) / 1_000_000 + searches * WEB_SEARCH_USD
+    today = _today_usage()
+    today["usd"] = round(today["usd"] + cost, 4)
+    set_state(_usage_key(), today)
+
+
+def record_voice(chars: int) -> None:
+    today = _today_usage()
+    today["voice_chars"] += chars
+    set_state(_usage_key(), today)
+
+
+def over_budget() -> bool:
+    return _today_usage()["usd"] >= DAILY_BUDGET_USD
+
+
+def voice_allowed(text: str) -> bool:
+    return _today_usage()["voice_chars"] + len(text) <= DAILY_VOICE_CHARS
+
+
+def budget_status() -> dict:
+    today = _today_usage()
+    return {
+        "usd": round(today["usd"], 2), "limit_usd": DAILY_BUDGET_USD,
+        "voice_chars": today["voice_chars"], "voice_limit": DAILY_VOICE_CHARS,
+    }
+
+
+async def warn_budget_once() -> None:
+    today = _today_usage()
+    if not today.get("alerted"):
+        today["alerted"] = True
+        set_state(_usage_key(), today)
+        await alert(
+            "Límite de gasto",
+            f"JARVIS ha llegado al límite de gasto de hoy ({DAILY_BUDGET_USD:.0f} $) y deja de usar la IA hasta mañana.",
+        )
+
+
+# ── FRENO DE PETICIONES ───────────────────────────────────────────────────────
+
+REQUESTS_PER_MINUTE = int(os.getenv("REQUESTS_PER_MINUTE", "20"))
+_recent_requests: list[float] = []
+
+
+def rate_limited() -> bool:
+    """Más de REQUESTS_PER_MINUTE preguntas en un minuto: algo va mal (un bucle o
+    alguien con el token). Se frena antes de gastar."""
+    now = datetime.now().timestamp()
+    _recent_requests[:] = [t for t in _recent_requests if now - t < 60]
+    if len(_recent_requests) >= REQUESTS_PER_MINUTE:
+        return True
+    _recent_requests.append(now)
+    return False
 
 
 LOCATION_MAX_AGE = timedelta(hours=2)
@@ -971,6 +1162,13 @@ async def stream_agent(user_input: str, ctx: AgentContext) -> AsyncIterator[str]
     agent_turn += 1
     ctx.turn = agent_turn
 
+    if over_budget():
+        await warn_budget_once()
+        line = f"He llegado al límite de gasto de hoy, {OWNER_NAME}. Mañana sigo a su servicio."
+        yield line
+        save_exchange(user_input, line, ctx.channel)
+        return
+
     messages = [*load_recent_history(), {"role": "user", "content": user_input}]
     system_prompt = build_system_prompt(user_input, ctx)
     spoken = []
@@ -997,6 +1195,7 @@ async def stream_agent(user_input: str, ctx: AgentContext) -> AsyncIterator[str]
                         spoken.append(sentence.strip())
                         yield sentence.strip()
             final = await stream.get_final_message()
+        record_usage(CLAUDE_MODEL, getattr(final, "usage", None))
 
         if buffer.strip():
             spoken.append(buffer.strip())
@@ -1051,6 +1250,9 @@ async def text_to_speech(text: str) -> Optional[bytes]:
 
 
 def _text_to_speech_sync(text: str) -> Optional[bytes]:
+    if not voice_allowed(text):
+        # Límite diario de voz: el iPhone lee el texto con la voz de Siri y la pantalla lo muestra.
+        return None
     try:
         audio_stream = client_elevenlabs.text_to_speech.convert(
             ELEVENLABS_VOICE_ID,
@@ -1058,7 +1260,9 @@ def _text_to_speech_sync(text: str) -> Optional[bytes]:
             model_id=ELEVENLABS_MODEL_ID,
             voice_settings=VOICE_SETTINGS,
         )
-        return b"".join(audio_stream)
+        audio = b"".join(audio_stream)
+        record_voice(len(text))
+        return audio
     except Exception as e:
         logger.error(f"ElevenLabs TTS error: {e}")
 
@@ -1123,6 +1327,8 @@ EMAIL_CLASSIFIER_SCHEMA = {
 async def classify_important(emails: list[dict]) -> list[dict]:
     """Qué correos nuevos merecen interrumpirle. Ante cualquier duda o error, ninguno:
     un aviso de más molesta, pero el correo sigue ahí cuando pregunte."""
+    if over_budget():
+        return []
     preferences = "; ".join(f"{k}: {v}" for k, v in load_preferences())
     try:
         response = await client_anthropic.messages.create(
@@ -1142,6 +1348,7 @@ async def classify_important(emails: list[dict]) -> list[dict]:
                 ensure_ascii=False,
             )}],
         )
+        record_usage(CLASSIFIER_MODEL, getattr(response, "usage", None))
         if response.stop_reason == "refusal":
             return []
         text = next(b.text for b in response.content if b.type == "text")
@@ -1189,6 +1396,136 @@ async def watch_fuel():
         set_state("fuel_alerted", True)
     elif fuel["fuel_percent"] > FUEL_ALERT_PERCENT + 10 and alerted:
         set_state("fuel_alerted", False)  # ya ha repostado: listo para el siguiente aviso
+
+
+async def watch_tires():
+    """Cada 30 minutos: avisa una vez si una rueda pierde presión, hasta que se corrija."""
+    if not MERCEDES_CONFIGURED:
+        return
+    tires = await asyncio.to_thread(_get_tire_status)
+    if not tires:
+        return
+    problems = tire_problems(tires)
+    alerted = get_state("tires_alerted", False)
+    if problems and not alerted:
+        await alert("Presión de neumáticos", f"Ojo con las ruedas: {'; '.join(problems)}. Conviene revisarlas.", urgent=True)
+        set_state("tires_alerted", True)
+    elif not problems and alerted:
+        set_state("tires_alerted", False)
+
+
+def eur(amount: float, currency: str = "EUR") -> str:
+    """1840.5 → '1.840,50 €', como se dice en España."""
+    text = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if text.endswith(",00"):
+        text = text[:-3]
+    return f"{text} €" if currency in ("EUR", "") else f"{text} {currency}"
+
+
+def _parse_order_date(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    # WooCommerce da la hora local de la tienda sin zona: se asume la de JARVIS.
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=ZoneInfo(TIMEZONE))
+
+
+async def morning_briefing():
+    """Resumen de la mañana al iPhone: agenda, correo, tienda, coche y tiempo."""
+    fuel, tires, temp, events, unread, sales, orders = await asyncio.gather(
+        _safe(_get_fuel_status), _safe(_get_tire_status), _safe(_temperature), _safe(_events_today),
+        _safe(google_services.count_unread),
+        _safe(lambda: store.sales_summary("yesterday", TIMEZONE) if store.is_configured() else None),
+        _safe(_pending_orders),
+    )
+    parts = [f"Buenos días, {OWNER_NAME}."]
+    if events is not None:
+        timed = [e for e in events if not e["all_day"]]
+        if timed:
+            first = timed[0]
+            start = datetime.fromisoformat(first["start"]).astimezone(ZoneInfo(TIMEZONE))
+            n = len(timed)
+            parts.append(f"Hoy tienes {n} cita{'s' if n != 1 else ''}; la primera, {first['title']} a las {start:%H:%M}.")
+        else:
+            parts.append("Hoy tienes la agenda libre.")
+    if unread:
+        parts.append(f"Tienes {unread} correo{'s' if unread != 1 else ''} sin leer.")
+    if sales:
+        parts.append(f"Ayer la tienda hizo {sales['orders']} pedidos por {eur(sales['revenue'], sales['currency'])}.")
+    if orders and orders["count"]:
+        parts.append(f"Hay {orders['count']} por enviar.")
+    if temp is not None:
+        parts.append(f"Fuera hacen {temp:.0f} grados.")
+    if fuel and fuel["fuel_percent"] <= 25:
+        parts.append(f"El depósito está al {fuel['fuel_percent']:.0f}%.")
+    problems = tire_problems(tires)
+    if problems:
+        parts.append(f"Ojo con las ruedas: {'; '.join(problems)}.")
+    await alert("Buenos días", " ".join(parts))
+
+
+async def store_closing():
+    """Cierre del día de la tienda, por la noche."""
+    if not store.is_configured():
+        return
+    sales, orders = await asyncio.gather(
+        _safe(store.sales_summary, "today", TIMEZONE), _safe(_pending_orders)
+    )
+    if not sales:
+        return
+    text = f"Cierre de la tienda: hoy {sales['orders']} pedidos por {eur(sales['revenue'], sales['currency'])}"
+    if sales["orders"]:
+        text += f", ticket medio de {eur(sales['average_order'], sales['currency'])}"
+    text += "."
+    if orders and orders["count"]:
+        text += f" Quedan {orders['count']} por enviar."
+    await alert("Cierre del día", text)
+
+
+async def watch_store():
+    """Cada 15 minutos: pedidos grandes, pedidos atascados y productos que se acaban."""
+    if not store.is_configured():
+        return
+    tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(tz)
+
+    # Pedidos grandes desde la última vez
+    since = get_state("store_last_check")
+    set_state("store_last_check", now.isoformat())
+    if since:
+        seen = set(get_state("big_orders_seen", []))
+        for order in await asyncio.to_thread(store.orders_between, datetime.fromisoformat(since), now):
+            if order["is_sale"] and order["total"] >= BIG_ORDER_AMOUNT and order["number"] not in seen:
+                who = f" de {order['customer']}" if order["customer"] else ""
+                await alert("Pedido grande", f"Pedido grande: {order['number']}{who} por {eur(order['total'], order['currency'])}.")
+                seen.add(order["number"])
+        set_state("big_orders_seen", list(seen)[-300:])
+
+    # Pedidos pagados que llevan días sin enviarse (un aviso por pedido)
+    pending = await asyncio.to_thread(store.pending_orders, 50)
+    warned = set(get_state("stale_orders_warned", []))
+    stale = [
+        o for o in pending["oldest"]
+        if o["number"] not in warned and (created := _parse_order_date(o["created"]))
+        and now - created >= timedelta(days=STALE_ORDER_DAYS)
+    ]
+    if stale:
+        numbers = ", ".join(str(o["number"]) for o in stale[:5])
+        await alert(
+            "Pedidos sin enviar",
+            f"{len(stale)} pedido{'s llevan' if len(stale) != 1 else ' lleva'} más de {STALE_ORDER_DAYS} días sin enviarse: {numbers}.",
+        )
+        set_state("stale_orders_warned", list(warned | {o["number"] for o in stale})[-300:])
+
+    # Stock bajo (un aviso por producto hasta que se reponga)
+    low = {p["name"]: p["stock"] for p in (await asyncio.to_thread(store.low_stock, LOW_STOCK_THRESHOLD))["products"]}
+    alerted = set(get_state("low_stock_alerted", []))
+    new_low = [name for name in low if name not in alerted]
+    if new_low:
+        listed = "; ".join(f"{name}: {'agotado' if low[name] <= 0 else f'quedan {low[name]}'}" for name in new_low[:5])
+        more = f" Y {len(new_low) - 5} más." if len(new_low) > 5 else ""
+        await alert("Stock bajo", f"Se están acabando productos de la tienda. {listed}.{more}")
+    set_state("low_stock_alerted", [name for name in low if name in alerted or name in new_low])
 
 
 DEPARTURE_LOOKAHEAD = timedelta(minutes=120)
@@ -1257,6 +1594,12 @@ async def startup():
     scheduler.add_job(watch_departures, "interval", minutes=5)
     scheduler.add_job(watch_email, "interval", minutes=10)
     scheduler.add_job(watch_fuel, "interval", minutes=30)
+    scheduler.add_job(watch_tires, "interval", minutes=30)
+    scheduler.add_job(watch_store, "interval", minutes=15)
+    for when, job in ((BRIEFING_TIME, morning_briefing), (STORE_CLOSE_TIME, store_closing)):
+        if when:
+            hour, minute = when.split(":")
+            scheduler.add_job(job, "cron", hour=int(hour), minute=int(minute))
     scheduler.start()
     logger.info("Vigilancia iniciada: recordatorios, hora de salir, correo importante y gasolina")
     if not notifier.is_configured():
@@ -1310,6 +1653,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if message.get("type") == "audio":
                 user_text = message.get("text", "").strip()
                 if not user_text:
+                    continue
+                if rate_limited():
+                    await websocket.send_json({"type": "error", "message": "Demasiadas peticiones seguidas; espera un minuto."})
                     continue
                 await websocket.send_json({"type": "status", "status": "processing"})
                 try:
@@ -1375,6 +1721,8 @@ async def ask(request: AskRequest):
     user_text = request.text.strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="texto vacío")
+    if rate_limited():
+        raise HTTPException(status_code=429, detail="Demasiadas peticiones seguidas; espera un minuto.")
     if request.lat is not None and request.lon is not None:
         save_location(request.lat, request.lon)
     ctx = AgentContext(channel="iphone", on_iphone=True)
@@ -1413,6 +1761,37 @@ def _get_lock_status() -> Optional[bool]:
     return car.get_lock_status(
         MERCEDES_VIN, MERCEDES_CLIENT_ID, MERCEDES_CLIENT_SECRET, MERCEDES_REFRESH_TOKEN
     )
+
+
+def _get_tire_status() -> Optional[dict]:
+    if not MERCEDES_CONFIGURED:
+        return None
+    return car.get_tire_status(
+        MERCEDES_VIN, MERCEDES_CLIENT_ID, MERCEDES_CLIENT_SECRET, MERCEDES_REFRESH_TOKEN
+    )
+
+
+WHEEL_NAMES = {
+    "front_left": "delantera izquierda", "front_right": "delantera derecha",
+    "rear_left": "trasera izquierda", "rear_right": "trasera derecha",
+}
+
+
+def tire_problems(tires: Optional[dict]) -> list[str]:
+    """Ruedas con la presión baja: el aviso del propio coche, una rueda claramente
+    por debajo de las demás (pinchazo lento) o por debajo del mínimo configurado."""
+    if not tires:
+        return []
+    bars = tires["bar"]
+    highest = max(bars.values())
+    low = [
+        wheel for wheel, bar in bars.items()
+        if highest - bar >= TIRE_DIFF_BAR or (TIRE_MIN_BAR is not None and bar < TIRE_MIN_BAR)
+    ]
+    problems = [f"la {WHEEL_NAMES[w]} está a {bars[w]:.1f} bar".replace(".", ",") for w in low]
+    if tires.get("warning") and not problems:
+        problems.append("el coche marca aviso de presión de neumáticos")
+    return problems
 
 
 @app.get("/api/car/status", dependencies=[Depends(require_token)])
@@ -1494,8 +1873,9 @@ async def carplay_greeting(lat: Optional[float] = None, lon: Optional[float] = N
     saludo = "Buenos días" if 6 <= hour < 13 else ("Buenas tardes" if 13 <= hour < 21 else "Buenas noches")
     parts = [f"{saludo}, {OWNER_NAME}."]
 
-    fuel, temp, calendar, unread, orders = await asyncio.gather(
+    fuel, tires, temp, calendar, unread, orders = await asyncio.gather(
         _safe(_get_fuel_status),
+        _safe(_get_tire_status),
         _safe(_temperature),
         _safe(_calendar_today),
         _safe(google_services.count_unread),
@@ -1507,6 +1887,9 @@ async def carplay_greeting(lat: Optional[float] = None, lon: Optional[float] = N
             f"Depósito al {fuel['fuel_percent']:.0f}%, "
             f"unos {fuel['range_km']:.0f} km de autonomía."
         )
+    problems = tire_problems(tires)
+    if problems:
+        parts.append(f"Ojo: {'; '.join(problems)}.")
     if temp is not None:
         parts.append(f"Fuera hacen {temp:.0f} grados.")
     if calendar and calendar["event"]:
@@ -1529,26 +1912,43 @@ async def carplay_greeting(lat: Optional[float] = None, lon: Optional[float] = N
         "audio_type": "audio/mp3",
     }
 
+@app.get("/api/status", dependencies=[Depends(require_token)])
+async def status():
+    """Lo mismo que diagnostico.py, para verlo desde el navegador o el panel."""
+    import diagnostico
+    return {"checks": await asyncio.to_thread(diagnostico.run_checks)}
+
+
+@app.get("/api/actions", dependencies=[Depends(require_token)])
+async def actions(limit: int = 50):
+    """Todo lo que JARVIS ha hecho en nombre de Nacho: correos, WhatsApp, citas, llamadas..."""
+    return {"actions": recent_actions(min(limit, 200))}
+
+
 @app.get("/api/dashboard", dependencies=[Depends(require_token)])
 async def dashboard():
     """Todo lo que muestra el panel de la tablet, consultado en paralelo. Cada
     bloque es null si no está configurado o falló, y el panel lo oculta."""
-    fuel, locked, temp, events, unread, sales, orders, pending = await asyncio.gather(
+    fuel, locked, tires, temp, events, unread, sales, orders, pending, actions = await asyncio.gather(
         _safe(_get_fuel_status),
         _safe(_get_lock_status),
+        _safe(_get_tire_status),
         _safe(_temperature),
         _safe(_events_today),
         _safe(_unread_preview),
         _safe(_sales_today),
         _safe(_pending_orders),
         _safe(_pending_tasks),
+        _safe(recent_actions),
     )
     car_block = None
-    if fuel or locked is not None:
+    if fuel or locked is not None or tires:
         car_block = {
             "fuel_percent": fuel["fuel_percent"] if fuel else None,
             "range_km": fuel["range_km"] if fuel else None,
             "locked": locked,
+            "tire_pressure_bar": tires["bar"] if tires else None,
+            "tire_problems": tire_problems(tires),
         }
     return {
         "owner": OWNER_NAME,
@@ -1560,6 +1960,8 @@ async def dashboard():
         "email": unread,
         "store": {"today": sales, "pending": orders} if (sales or orders) else None,
         "tasks": pending,
+        "actions": actions,
+        "budget": budget_status(),
     }
 
 

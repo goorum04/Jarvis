@@ -7,6 +7,7 @@ y se renueva solo. Ver CONFIGURAR_JARVIS.md.
 """
 import base64
 import html
+import io
 import logging
 import re
 from datetime import datetime, timedelta
@@ -19,6 +20,7 @@ from zoneinfo import ZoneInfo
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +28,12 @@ BASE_DIR = Path(__file__).parent
 CLIENT_SECRETS_FILE = BASE_DIR / "google_credentials.json"
 TOKEN_FILE = BASE_DIR / "google_token.json"
 
+DOCS_SCOPE = "https://www.googleapis.com/auth/drive.file"  # solo los archivos que crea JARVIS
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar.events",
+    DOCS_SCOPE,
 ]
 
 INBOX_QUERY = "in:inbox -category:promotions -category:social"
@@ -49,7 +53,9 @@ def _credentials() -> Credentials:
         raise GoogleNotConfigured(
             "Gmail y Calendar no están conectados todavía: hay que ejecutar autorizar_google.py en el PC."
         )
-    creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+    # Sin pasar SCOPES: así creds.scopes son los permisos que Nacho concedió de
+    # verdad, y al renovar no se apuntan como concedidos permisos que no dio.
+    creds = Credentials.from_authorized_user_file(str(TOKEN_FILE))
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
@@ -70,6 +76,16 @@ def _gmail():
 
 def _calendar():
     return build("calendar", "v3", credentials=_credentials(), cache_discovery=False)
+
+
+def _docs():
+    creds = _credentials()
+    # Quien autorizó antes de que existiera esta función no dio permiso de documentos.
+    if DOCS_SCOPE not in (creds.scopes or []):
+        raise GoogleNotConfigured(
+            "Para crear documentos hay que volver a ejecutar autorizar_google.py y aceptar el permiso nuevo."
+        )
+    return build("docs", "v1", credentials=creds, cache_discovery=False)
 
 
 # ── GMAIL ────────────────────────────────────────────────────────────────────
@@ -199,6 +215,104 @@ def reply_preview(message_id: str) -> dict:
     """A quién y con qué asunto iría la respuesta, para confirmarlo antes de enviar."""
     mime, _ = build_reply(message_id, "")
     return {"to": mime["To"], "subject": mime["Subject"]}
+
+
+MAX_ATTACHMENTS = 3
+MAX_ATTACHMENT_CHARS = 4000
+
+
+def read_attachments(message_id: str) -> dict:
+    """Texto de los PDF adjuntos de un correo (facturas, presupuestos...)."""
+    service = _gmail()
+    message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+
+    pdf_parts = []
+
+    def walk(part):
+        filename = part.get("filename") or ""
+        attachment_id = part.get("body", {}).get("attachmentId")
+        if attachment_id and (part.get("mimeType") == "application/pdf" or filename.lower().endswith(".pdf")):
+            pdf_parts.append((filename or "adjunto.pdf", attachment_id))
+        for sub in part.get("parts", []):
+            walk(sub)
+
+    walk(message["payload"])
+    attachments = []
+    for filename, attachment_id in pdf_parts[:MAX_ATTACHMENTS]:
+        data = service.users().messages().attachments().get(
+            userId="me", messageId=message_id, id=attachment_id
+        ).execute()["data"]
+        try:
+            reader = PdfReader(io.BytesIO(base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))))
+            text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        except Exception as e:
+            logger.error(f"No se pudo leer el PDF {filename}: {e}")
+            text = ""
+        attachments.append({
+            "filename": filename,
+            "text": text[:MAX_ATTACHMENT_CHARS] or "(PDF sin texto legible, probablemente escaneado)",
+        })
+    return {"email": _summary(message), "attachments": attachments, "pdf_count": len(pdf_parts)}
+
+
+# ── DOCS ─────────────────────────────────────────────────────────────────────
+
+HEADINGS = {"# ": "HEADING_1", "## ": "HEADING_2", "### ": "HEADING_3"}
+
+
+def _utf16_len(text: str) -> int:
+    # La API de Docs cuenta posiciones en unidades UTF-16.
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _document_requests(content: str) -> list[dict]:
+    """Convierte un texto sencillo con '# título' y '- viñeta' en peticiones de la API de Docs."""
+    lines, styles, bullets = [], [], []
+    index = 1
+    for raw in content.replace("\r\n", "\n").split("\n"):
+        line, style, bullet = raw.replace("**", ""), None, False
+        for prefix, named in sorted(HEADINGS.items(), key=lambda kv: -len(kv[0])):
+            if line.startswith(prefix):
+                line, style = line[len(prefix):], named
+                break
+        if style is None and line.lstrip().startswith(("- ", "* ")):
+            line, bullet = line.lstrip()[2:], True
+        text = line + "\n"
+        end = index + _utf16_len(text)
+        if style:
+            styles.append((index, end, style))
+        if bullet:
+            bullets.append((index, end))
+        lines.append(text)
+        index = end
+
+    requests = [{"insertText": {"location": {"index": 1}, "text": "".join(lines)}}]
+    for start, end, style in styles:
+        requests.append({"updateParagraphStyle": {
+            "range": {"startIndex": start, "endIndex": end},
+            "paragraphStyle": {"namedStyleType": style},
+            "fields": "namedStyleType",
+        }})
+    for start, end in bullets:
+        requests.append({"createParagraphBullets": {
+            "range": {"startIndex": start, "endIndex": end},
+            "bulletPreset": "BULLET_DISC_CIRCLE_SQUARE",
+        }})
+    return requests
+
+
+def create_document(title: str, content: str) -> dict:
+    service = _docs()
+    document = service.documents().create(body={"title": title}).execute()
+    document_id = document["documentId"]
+    service.documents().batchUpdate(
+        documentId=document_id, body={"requests": _document_requests(content)}
+    ).execute()
+    return {
+        "success": True,
+        "title": title,
+        "url": f"https://docs.google.com/document/d/{document_id}/edit",
+    }
 
 
 # ── CALENDAR ─────────────────────────────────────────────────────────────────

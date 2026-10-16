@@ -5,7 +5,18 @@ y hablan a través de Siri y de Atajos de iOS; una tablet en casa u oficina
 hace de panel permanente. Esta guía cubre lo que hay que hacer una sola vez.
 
 Cada parte funciona por separado: si algo no está configurado, JARVIS
-simplemente no lo menciona. Orden recomendado: del 1 al 9.
+simplemente no lo menciona. Orden recomendado: del 1 al 10.
+
+**Después de cada paso**, ejecutar en el PC:
+
+```
+python diagnostico.py
+```
+
+Revisa cada pieza contra los servicios reales (sin gastar créditos) y dice
+qué funciona, qué falta y cómo arreglarlo. Con `--probar-avisos` manda
+además un aviso de prueba al iPhone. Lo mismo se ve en
+`https://jarvis.sudominio.com/api/status` con el token.
 
 ---
 
@@ -31,7 +42,8 @@ responder y de avisar.
 Se hace en <https://console.cloud.google.com> con la cuenta de Gmail de Nacho.
 
 1. Crear un proyecto nuevo (por ejemplo, "JARVIS").
-2. *APIs y servicios → Biblioteca*: activar **Gmail API** y **Google Calendar API**.
+2. *APIs y servicios → Biblioteca*: activar **Gmail API**, **Google Calendar API**
+   y **Google Docs API** (para que JARVIS cree documentos).
 3. *APIs y servicios → Pantalla de consentimiento de OAuth*:
    - Tipo de usuario: **Externo**. Nombre de la app: JARVIS.
    - Añadir su propio correo como usuario de prueba.
@@ -47,6 +59,11 @@ Se hace en <https://console.cloud.google.com> con la cuenta de Gmail de Nacho.
    Queda guardado `google_token.json` y ya no hay que repetirlo.
 
 Ninguno de esos dos archivos se sube al repositorio (están en `.gitignore`).
+
+Los documentos se crean en su Drive y JARVIS solo tiene acceso a los que crea
+él, no al resto de su Drive. Si Google se autorizó antes de existir esta
+función, `diagnostico.py` lo indica: basta con volver a ejecutar
+`python autorizar_google.py`.
 
 ## 3. Tráfico y navegación
 
@@ -75,7 +92,8 @@ Mercedes, y se ajusta en un minuto.
 Con permisos **solo de lectura**: JARVIS consulta ventas y pedidos, no toca nada.
 
 - **Shopify**: *Configuración → Apps y canales de venta → Desarrollar apps →
-  Crear una app* → permisos de Admin API: `read_orders` → instalar y copiar el
+  Crear una app* → permisos de Admin API: `read_orders` y `read_products`
+  (este último para el aviso de stock bajo) → instalar y copiar el
   *token de acceso de Admin API*. En `.env`: `STORE_PLATFORM=shopify`,
   `SHOPIFY_SHOP=sutienda.myshopify.com`, `SHOPIFY_ACCESS_TOKEN=...`.
 - **WooCommerce**: *WooCommerce → Ajustes → Avanzado → API REST → Añadir clave*,
@@ -106,6 +124,16 @@ JARVIS vigila por su cuenta y avisa al iPhone de:
   de lo que merece interrumpir (personas esperando respuesta, banco,
   clientes con problemas…), no de publicidad ni boletines.
 - **Gasolina baja**, una sola vez hasta que reposte (`FUEL_ALERT_PERCENT`).
+- **Rueda con poca presión**: si el coche marca aviso, o una rueda está
+  claramente por debajo de las demás (pinchazo lento). Una vez, hasta que se infle.
+- **Tienda**: pedido grande (`BIG_ORDER_AMOUNT`), pedidos pagados que llevan
+  días sin enviarse (`STALE_ORDER_DAYS`) y productos que se acaban
+  (`LOW_STOCK_THRESHOLD`).
+- **Informe de la mañana** (`BRIEFING_TIME`, 8:00): citas del día, correo sin
+  leer, ventas de ayer, pedidos por enviar, tiempo, y gasolina o ruedas si
+  hace falta.
+- **Cierre de la tienda** (`STORE_CLOSE_TIME`, 21:30): pedidos, facturación y
+  ticket medio del día.
 
 Para recibirlos, una de las dos:
 
@@ -229,10 +257,40 @@ En el PC: `iniciar_frontend.bat`. En la tablet (misma WiFi), abrir una vez
 Desde fuera de casa: `?token=TOKEN&api=https://jarvis.sudominio.com`.
 
 A la izquierda, la conversación (botón de micrófono). A la derecha, en vivo:
-tiempo, depósito y cierre del coche, agenda de hoy, correo sin leer, ventas
-y pedidos por enviar, y lo pendiente. Se actualiza cada minuto y cada vez
-que JARVIS termina de hablar. En la tablet, *Añadir a pantalla de inicio*
-para que se abra a pantalla completa.
+tiempo; depósito, cierre y presión de cada rueda del coche; agenda de hoy;
+correo sin leer; ventas y pedidos por enviar; lo pendiente; **lo que JARVIS
+ha hecho en su nombre** (correos, WhatsApp, citas, documentos, llamadas); y
+el gasto del día. Se actualiza cada minuto y cada vez que JARVIS termina de
+hablar. En la tablet, *Añadir a pantalla de inicio* para que se abra a
+pantalla completa.
+
+El registro completo de acciones está también en `/api/actions`.
+
+## 10. Una voz propia para JARVIS
+
+La voz por defecto es "George", una voz estándar de ElevenLabs. Para que
+JARVIS tenga una voz suya (original: imitar la de un actor real no es legal):
+
+1. En <https://elevenlabs.io>: *Voices → Add a new voice → Voice Design*.
+2. Describirla, por ejemplo: *"Hombre de unos cincuenta años, voz grave,
+   serena y elegante, español de España con un leve acento británico, tono de
+   mayordomo culto con un punto de ironía"*.
+3. Como texto de prueba, una frase típica: *"Buenos días, señor. Depósito al
+   setenta por ciento y la primera reunión a las diez."*
+4. Escuchar las variantes, guardar la que más guste y copiar su **Voice ID**
+   en `ELEVENLABS_VOICE_ID`.
+
+## Protección
+
+- **Límite de gasto diario** (`DAILY_BUDGET_USD`, 10 $ por defecto): al
+  llegar, JARVIS avisa y deja de usar la IA hasta el día siguiente. El gasto
+  del día se ve en el panel.
+- **Límite de voz** (`DAILY_VOICE_CHARS`): pasado el límite, responde con
+  texto y el iPhone lo lee con la voz de Siri.
+- **Freno** (`REQUESTS_PER_MINUTE`): más preguntas de las normales en un
+  minuto se rechazan, por si algo entra en bucle o alguien consigue el token.
+- **Registro**: todo lo que JARVIS envía, crea o borra en su nombre queda
+  apuntado con la hora.
 
 ---
 
@@ -244,11 +302,18 @@ para que se abra a pantalla completa.
 - **Agenda**: "¿Qué tengo hoy?", "¿Y mañana?", "Agéndame dentista el jueves
   a las cinco", "Cancela la reunión de las diez".
 - **Conducir**: "Llévame a mi próxima cita", "Llévame a casa", "¿Cuánto
-  tardo a la oficina?", "¿Cuánta gasolina tengo?", "¿Cerré el coche?".
+  tardo a la oficina?", "¿Cuánta gasolina tengo?", "¿Cerré el coche?",
+  "¿Cómo están las ruedas?".
+- **Documentos**: "Hazme un presupuesto para Laura con cuatro llantas R19 y
+  el montaje", "Prepárame un resumen de la reunión de hoy" (y después
+  "mándaselo a Laura").
+- **Facturas**: "¿Cuánto le he pagado este mes a Neumáticos Pérez?", "¿Me ha
+  llegado la factura de la luz?".
 - **WhatsApp y llamadas** (desde el iPhone o el coche): "Dile a Marta que
   llego en diez minutos", "Llama a Laura".
 - **Tienda**: "¿Cuánto he vendido hoy?", "¿Y esta semana?", "¿Hay pedidos
-  sin enviar?", "¿Qué es lo que más se vende este mes?".
+  sin enviar?", "¿Qué es lo que más se vende este mes?", "¿Qué productos se
+  están acabando?".
 - **Internet**: "¿Cómo ha quedado el Madrid?", "Noticias de hoy", "¿A qué
   hora cierra el taller Pérez?".
 - **Casa y música**: "Abre el garaje", "Pon música tranquila" (los Atajos de
