@@ -18,6 +18,11 @@ const JARVIS = () => {
   const animationRef = useRef(null);
   // Ref para evitar closure obsoleto en onend de SpeechRecognition
   const transcriptRef = useRef('');
+  // Frases de audio pendientes de reproducir, en orden de llegada
+  const audioQueueRef = useRef([]);
+  const playingRef = useRef(false);
+  const responseDoneRef = useRef(true);
+  const responseTextRef = useRef('');
 
   // Inicializar WebSocket
   useEffect(() => {
@@ -36,7 +41,13 @@ const JARVIS = () => {
 
   const initializeWebSocket = () => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//localhost:8000/ws`;
+    // El token se pasa una vez como ?token=... en la URL y se recuerda en este navegador.
+    const urlToken = new URLSearchParams(window.location.search).get('token');
+    if (urlToken) {
+      localStorage.setItem('jarvis_token', urlToken);
+    }
+    const token = urlToken || localStorage.getItem('jarvis_token') || '';
+    const wsUrl = `${wsProtocol}//${window.location.hostname}:8000/ws?token=${encodeURIComponent(token)}`;
 
     wsRef.current = new WebSocket(wsUrl);
 
@@ -52,12 +63,22 @@ const JARVIS = () => {
         case 'status':
           setStatus(data.status);
           break;
-        case 'response':
-          setResponse(data.text);
-          setHistory(prev => [...prev, { type: 'user', text: transcriptRef.current }, { type: 'assistant', text: data.text }]);
-          
+        case 'response_chunk':
+          if (responseDoneRef.current) {
+            responseDoneRef.current = false;
+            responseTextRef.current = '';
+          }
+          responseTextRef.current = `${responseTextRef.current} ${data.text}`.trim();
+          setResponse(responseTextRef.current);
           if (data.audio) {
-            playAudio(data.audio);
+            enqueueAudio(data.audio);
+          }
+          break;
+        case 'response_done':
+          responseDoneRef.current = true;
+          setHistory(prev => [...prev, { type: 'user', text: transcriptRef.current }, { type: 'assistant', text: responseTextRef.current }]);
+          if (!playingRef.current) {
+            setStatus('ready');
           }
           break;
         case 'error':
@@ -68,7 +89,7 @@ const JARVIS = () => {
           setResponse(data.text);
           setStatus('reminder');
           if (data.audio) {
-            playAudio(data.audio);
+            enqueueAudio(data.audio);
           }
           break;
       }
@@ -154,30 +175,49 @@ const JARVIS = () => {
     }
   };
 
-  const playAudio = (base64Audio) => {
+  const enqueueAudio = (base64Audio) => {
+    audioQueueRef.current.push(base64Audio);
+    if (!playingRef.current) {
+      playNextAudio();
+    }
+  };
+
+  const playNextAudio = () => {
+    const base64Audio = audioQueueRef.current.shift();
+    if (!base64Audio) {
+      playingRef.current = false;
+      setIsSpeaking(false);
+      setWaveIntensity(0);
+      if (animationRef.current) {
+        clearInterval(animationRef.current);
+        animationRef.current = null;
+      }
+      if (responseDoneRef.current) {
+        setStatus('ready');
+      }
+      return;
+    }
+
+    playingRef.current = true;
     const binaryString = atob(base64Audio);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
-    const blob = new Blob([bytes], { type: 'audio/mp3' });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mp3' }));
 
     const audio = new Audio(url);
     audio.onplay = () => {
       setIsSpeaking(true);
       animateWaves();
     };
-    audio.onended = () => {
-      setIsSpeaking(false);
-      setStatus('ready');
-      setWaveIntensity(0);
-      if (animationRef.current) {
-        clearInterval(animationRef.current);
-        animationRef.current = null;
-      }
+    const next = () => {
+      URL.revokeObjectURL(url);
+      playNextAudio();
     };
-    audio.play();
+    audio.onended = next;
+    audio.onerror = next;
+    audio.play().catch(next);
   };
 
   const animateWaves = () => {

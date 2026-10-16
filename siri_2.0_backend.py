@@ -5,17 +5,20 @@ JARVIS 2.0 - Backend con agente, memoria persistente y recordatorios proactivos
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import asyncio
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, date
 from dotenv import load_dotenv
 import anthropic
 import openai
+from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 import base64
 import tempfile
-from typing import Optional
+from typing import AsyncIterator, Optional
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -31,6 +34,10 @@ CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")  # voz premade "George"
+# eleven_flash_v2_5 es el de menor latencia; eleven_multilingual_v2 suena algo mejor pero tarda más.
+ELEVENLABS_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5")
+OWNER_NAME = os.getenv("OWNER_NAME", "Nacho")
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Madrid")
 JARVIS_API_TOKEN = os.getenv("JARVIS_API_TOKEN")
 
@@ -45,7 +52,7 @@ MERCEDES_CONFIGURED = all(
     [MERCEDES_CLIENT_ID, MERCEDES_CLIENT_SECRET, MERCEDES_REFRESH_TOKEN, MERCEDES_VIN]
 )
 
-client_anthropic = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+client_anthropic = anthropic.AsyncAnthropic(api_key=CLAUDE_API_KEY)
 client_openai = openai.OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 client_elevenlabs = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
@@ -90,6 +97,13 @@ def init_db():
             title TEXT,
             content TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS preferences (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
@@ -176,6 +190,29 @@ TOOLS = [
             },
             "required": ["reminder_id"]
         }
+    },
+    {
+        "name": "remember_preference",
+        "description": "Recuerda de forma permanente una preferencia o dato personal estable del usuario (p. ej. 'café': 'solo, sin azúcar'). Si la clave ya existe, se actualiza. Lo que guardes aquí lo sabrás en todas las conversaciones futuras.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Tema corto, p. ej. 'café', 'equipo de fútbol', 'pareja'"},
+                "value": {"type": "string", "description": "El dato a recordar"}
+            },
+            "required": ["key", "value"]
+        }
+    },
+    {
+        "name": "forget_preference",
+        "description": "Olvida una preferencia guardada cuando el usuario lo pide o deja de ser cierta.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Clave de la preferencia a olvidar"}
+            },
+            "required": ["key"]
+        }
     }
 ]
 
@@ -247,6 +284,20 @@ def execute_tool(name: str, inputs: dict) -> dict:
             deleted = c.rowcount > 0
             return {"success": deleted}
 
+        elif name == "remember_preference":
+            c.execute(
+                "INSERT INTO preferences (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                (inputs["key"].strip().lower(), inputs["value"])
+            )
+            conn.commit()
+            return {"success": True}
+
+        elif name == "forget_preference":
+            c.execute("DELETE FROM preferences WHERE key = ?", (inputs["key"].strip().lower(),))
+            conn.commit()
+            return {"success": c.rowcount > 0}
+
         else:
             return {"error": f"Herramienta desconocida: {name}"}
 
@@ -299,61 +350,134 @@ def add_to_history(role: str, content: str):
     if len(conversation_history) > MAX_HISTORY:
         conversation_history.pop(0)
 
-async def run_agent(user_input: str) -> str:
-    messages = [*conversation_history[-10:], {"role": "user", "content": user_input}]
+DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+         "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
-    system_prompt = (
-        f"Eres JARVIS, asistente IA personal. Responde siempre en español, de forma concisa y profesional. "
-        f"Fecha y hora actual: {datetime.now().strftime('%A %d de %B de %Y, %H:%M')}. "
-        "Usa las herramientas disponibles cuando el usuario quiera guardar tareas, recordatorios o notas, "
-        "o cuando pregunte qué tiene pendiente. Confirma las acciones brevemente. Máximo 2-3 oraciones."
+# Corta en fin de frase para poder empezar a hablar antes de tener la respuesta entera.
+SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+
+
+def load_preferences() -> list[tuple[str, str]]:
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT key, value FROM preferences ORDER BY key").fetchall()
+    conn.close()
+    return rows
+
+
+def build_system_prompt(user_input: str) -> str:
+    now = datetime.now()
+    fecha = f"{DIAS[now.weekday()]} {now.day} de {MESES[now.month - 1]} de {now.year}, {now:%H:%M}"
+
+    prompt = (
+        f"Eres JARVIS, el asistente personal de {OWNER_NAME}. Hablas español de España con un tono "
+        "sereno, elegante y un punto de ironía británica, como un mayordomo brillante y leal. "
+        "Todo lo que dices se lee en voz alta, a menudo mientras conduce: responde en una a tres "
+        "frases cortas, sin listas, sin markdown y sin emojis. Ve al grano, con ingenio cuando encaje, "
+        f"y llámale {OWNER_NAME} de vez en cuando, sin abusar. "
+        "Nunca inventes datos sobre su agenda, su coche, su correo o sus cosas: si no tienes el dato, "
+        "dilo con naturalidad. "
+        "Usa las herramientas cuando quiera guardar tareas, recordatorios o notas, o pregunte qué "
+        "tiene pendiente, y confirma las acciones en pocas palabras. "
+        "Cuando te cuente una preferencia o un dato personal estable (cómo le gusta el café, su "
+        "equipo, nombres de gente cercana, rutinas), guárdalo con remember_preference sin preguntar.\n\n"
+        f"Ahora es {fecha}."
     )
+
+    preferences = load_preferences()
+    if preferences:
+        prompt += f"\n\nLo que ya sabes de {OWNER_NAME}:\n" + "\n".join(
+            f"- {key}: {value}" for key, value in preferences
+        )
 
     context = retrieve_context(client_openai, user_input) if client_openai else ""
     if context:
-        system_prompt += (
-            "\n\nUsa la siguiente información de los documentos del usuario para responder si es relevante "
-            "a la pregunta. Si no tiene relación, ignórala y responde con tu conocimiento general.\n\n"
+        prompt += (
+            "\n\nUsa la siguiente información de sus documentos si es relevante para la pregunta. "
+            "Si no tiene relación, ignórala.\n\n"
             f"{context}"
         )
+    return prompt
+
+
+async def stream_agent(user_input: str) -> AsyncIterator[str]:
+    """Genera la respuesta frase a frase según llega de Claude, ejecutando las
+    herramientas que pida por el camino."""
+    messages = [*conversation_history[-10:], {"role": "user", "content": user_input}]
+    system_prompt = build_system_prompt(user_input)
+    spoken = []
 
     while True:
-        response = client_anthropic.messages.create(
-            model="claude-opus-5",
+        buffer = ""
+        async with client_anthropic.messages.stream(
+            model=CLAUDE_MODEL,
             max_tokens=500,
             system=system_prompt,
             tools=TOOLS,
-            messages=messages
-        )
+            messages=messages,
+        ) as stream:
+            async for delta in stream.text_stream:
+                buffer += delta
+                *sentences, buffer = SENTENCE_END.split(buffer)
+                for sentence in sentences:
+                    if sentence.strip():
+                        spoken.append(sentence.strip())
+                        yield sentence.strip()
+            final = await stream.get_final_message()
 
-        if response.stop_reason == "end_turn":
-            text = next((b.text for b in response.content if hasattr(b, "text")), "")
-            add_to_history("user", user_input)
-            add_to_history("assistant", text)
-            return text
+        if buffer.strip():
+            spoken.append(buffer.strip())
+            yield buffer.strip()
 
+        if final.stop_reason != "tool_use":
+            break
+
+        assistant_content = []
         tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
+        for block in final.content:
+            if block.type == "text":
+                assistant_content.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                assistant_content.append(
+                    {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                )
                 logger.info(f"Tool: {block.name} → {block.input}")
                 result = execute_tool(block.name, block.input)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": json.dumps(result, ensure_ascii=False)
+                    "content": json.dumps(result, ensure_ascii=False),
                 })
 
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "assistant", "content": assistant_content})
         messages.append({"role": "user", "content": tool_results})
+
+    add_to_history("user", user_input)
+    add_to_history("assistant", " ".join(spoken))
+
+
+async def run_agent(user_input: str) -> str:
+    return " ".join([sentence async for sentence in stream_agent(user_input)])
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
 
+# Voz serena y estable, tipo mayordomo: poca variación, algo de estilo.
+VOICE_SETTINGS = VoiceSettings(stability=0.6, similarity_boost=0.8, style=0.25, use_speaker_boost=True)
+
+
 async def text_to_speech(text: str) -> Optional[bytes]:
+    # Las llamadas de TTS son bloqueantes: en un hilo aparte para poder
+    # sintetizar una frase mientras Claude sigue generando la siguiente.
+    return await asyncio.to_thread(_text_to_speech_sync, text)
+
+
+def _text_to_speech_sync(text: str) -> Optional[bytes]:
     try:
         audio_stream = client_elevenlabs.text_to_speech.convert(
             ELEVENLABS_VOICE_ID,
             text=text,
-            model_id="eleven_multilingual_v2",
+            model_id=ELEVENLABS_MODEL_ID,
+            voice_settings=VOICE_SETTINGS,
         )
         return b"".join(audio_stream)
     except Exception as e:
@@ -415,6 +539,33 @@ async def shutdown():
 
 # ── WEBSOCKET ENDPOINT ────────────────────────────────────────────────────────
 
+async def stream_response(websocket: WebSocket, user_text: str):
+    """Manda cada frase con su audio en cuanto está lista. La síntesis de cada
+    frase arranca mientras Claude sigue escribiendo la siguiente, y se envían
+    en orden para que el cliente las reproduzca seguidas."""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def produce():
+        try:
+            async for sentence in stream_agent(user_text):
+                await queue.put((sentence, asyncio.create_task(text_to_speech(sentence))))
+        finally:
+            await queue.put(None)
+
+    producer = asyncio.create_task(produce())
+    while (item := await queue.get()) is not None:
+        sentence, tts_task = item
+        audio_bytes = await tts_task
+        await websocket.send_json({
+            "type": "response_chunk",
+            "text": sentence,
+            "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
+            "audio_type": "audio/mp3",
+        })
+    await producer
+    await websocket.send_json({"type": "response_done"})
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     if JARVIS_API_TOKEN and websocket.query_params.get("token") != JARVIS_API_TOKEN:
@@ -433,14 +584,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                 await websocket.send_json({"type": "status", "status": "processing"})
                 try:
-                    ai_response = await run_agent(user_text)
-                    audio_bytes = await text_to_speech(ai_response)
-                    await websocket.send_json({
-                        "type": "response",
-                        "text": ai_response,
-                        "audio": base64.b64encode(audio_bytes).decode() if audio_bytes else None,
-                        "audio_type": "audio/mp3"
-                    })
+                    await stream_response(websocket, user_text)
                 except Exception as e:
                     logger.error(f"Agent error: {e}")
                     await websocket.send_json({"type": "error", "message": str(e)})
@@ -538,7 +682,7 @@ async def carplay_greeting():
     parts = []
     hour = datetime.now().hour
     saludo = "Buenos días" if hour < 13 else ("Buenas tardes" if hour < 21 else "Buenas noches")
-    parts.append(saludo + ", Nacho.")
+    parts.append(f"{saludo}, {OWNER_NAME}.")
 
     fuel = _get_fuel_status()
     if fuel:
