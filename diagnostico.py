@@ -22,6 +22,7 @@ import maps  # noqa: E402
 import notifier  # noqa: E402
 import store  # noqa: E402
 import weather  # noqa: E402
+import whoop  # noqa: E402
 
 OK, AVISO, FALLO, APAGADO = "ok", "aviso", "fallo", "sin configurar"
 ICONS = {OK: "✅", AVISO: "⚠️ ", FALLO: "❌", APAGADO: "➖"}
@@ -131,6 +132,28 @@ def check_mercedes():
     ]
 
 
+def check_whoop():
+    if not whoop.app_ready():
+        return _result("Pulsera WHOOP", APAGADO, "Sin la app de WHOOP preparada.", "Guía, paso 12.")
+    if not whoop.is_configured():
+        return _result("Pulsera WHOOP", APAGADO, "Sin conectar.", "Panel → Conexiones → Pulsera WHOOP → Conectar.")
+    try:
+        data = whoop.summary(include_workouts=False)
+    except Exception as e:
+        return _result("Pulsera WHOOP", FALLO, _short_error(e), "Vuelve a conectarla desde el panel (Conexiones).")
+    rec, sleep = data["recovery"], data["sleep"]
+    if not (rec or sleep or data["strain"]):
+        return _result("Pulsera WHOOP", AVISO, "Conectada, pero WHOOP aún no tiene datos calculados de hoy.")
+    bits = []
+    if rec:
+        bits.append(f"recuperación {rec['recovery_percent']:.0f}%")
+    if sleep and sleep.get("hours_asleep"):
+        bits.append(f"{sleep['hours_asleep']} h de sueño")
+    if data["strain"]:
+        bits.append(f"esfuerzo {data['strain']['strain']}")
+    return _result("Pulsera WHOOP", OK, "Conectada: " + ", ".join(bits) + ".")
+
+
 def check_calls():
     import phone_calls
     if not phone_calls.is_configured():
@@ -206,7 +229,7 @@ def check_public_url():
 
 def run_checks(send_test: bool = False) -> list[dict]:
     checks: list[Callable] = [
-        check_token, check_claude, check_voice, check_google, check_mercedes, check_calls, check_store,
+        check_token, check_claude, check_voice, check_google, check_mercedes, check_whoop, check_calls, check_store,
         check_maps, check_weather, lambda: check_notifications(send_test), check_public_url,
     ]
     results = []

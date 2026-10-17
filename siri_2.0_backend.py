@@ -40,6 +40,7 @@ import notifier  # noqa: E402
 import phone_calls  # noqa: E402
 import store  # noqa: E402
 import weather  # noqa: E402
+import whoop  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -416,6 +417,16 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}}
     },
     {
+        "name": "get_health",
+        "description": "Datos de su pulsera WHOOP: recuperación de hoy (% y zona verde/amarilla/roja, VFC, pulso en reposo), cómo durmió anoche (horas dormidas frente a las que necesitaba, rendimiento, sueño profundo y REM), esfuerzo (strain, 0-21) y calorías de hoy, y entrenamientos de los últimos días. Úsalo cuando pregunte cómo ha dormido, cómo está, cuánto ha entrenado o si le conviene entrenar fuerte hoy.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_workouts": {"type": "boolean", "description": "Incluir los entrenamientos de los últimos 7 días (por defecto sí)"}
+            }
+        }
+    },
+    {
         "name": "get_weather",
         "description": "Temperatura actual en su zona.",
         "input_schema": {"type": "object", "properties": {}}
@@ -685,6 +696,10 @@ def execute_integration_tool(name: str, inputs: dict, ctx: AgentContext) -> dict
         return _set_pending(ctx, "calendar_delete", {"event_id": inputs["event_id"]}, {"title": inputs["title"]})
     if name == "get_car_status":
         return _car_status()
+    if name == "get_health":
+        if not whoop.is_configured():
+            return {"error": "La pulsera WHOOP no está conectada: se conecta en el panel, en Conexiones."}
+        return whoop.summary(include_workouts=inputs.get("include_workouts", True))
     if name == "get_weather":
         lat, lon = current_position()
         if lat is None:
@@ -748,7 +763,7 @@ INTEGRATION_TOOLS = {
     "check_email", "search_email", "read_email", "prepare_email_reply", "prepare_new_email",
     "prepare_whatsapp", "confirm_pending_action", "cancel_pending_action",
     "get_calendar_events", "create_calendar_event", "prepare_delete_calendar_event",
-    "get_car_status", "get_weather", "navigate_to", "get_travel_time", "call_contact",
+    "get_car_status", "get_health", "get_weather", "navigate_to", "get_travel_time", "call_contact",
     "run_iphone_shortcut", "get_store_sales", "get_pending_orders", "get_top_products",
     "search_conversations", "create_document", "read_email_attachments", "get_low_stock",
     "prepare_phone_call",
@@ -1261,13 +1276,15 @@ def build_system_prompt(user_input: str, ctx: AgentContext) -> str:
         "dilo con naturalidad. "
         "No cierres con preguntas de cortesía como '¿algo más?': pregunta solo cuando necesites "
         "una respuesta suya. "
-        "Tienes acceso a su Gmail, su Google Calendar, su Mercedes, su tienda online, el tiempo, "
+        "Tienes acceso a su Gmail, su Google Calendar, su Mercedes, su pulsera WHOOP, su tienda online, el tiempo, "
         "el tráfico, búsqueda en internet y vuestras conversaciones anteriores; úsalos sin pedir "
         "permiso para consultar. Busca en internet para noticias, resultados, horarios o cualquier "
         "dato actual, y resume lo encontrado en una o dos frases, sin leer enlaces. "
         "Desde el iPhone también puedes abrir la navegación, llamar y lanzar sus Atajos. "
         "Además puedes hacer llamadas de teléfono en su nombre con un agente de voz (reservar mesa, pedir cita, "
         "preguntar horarios): reúne antes todos los datos que hagan falta. "
+        "Con los datos de la WHOOP habla como lo haría la propia app (recuperación, sueño, esfuerzo), "
+        "sin diagnósticos ni consejos médicos; si algo le preocupa de su salud, que lo consulte con su médico. "
         "Para tareas, recordatorios y notas usa las herramientas propias y confirma en pocas palabras. "
         "Enviar correos, enviar WhatsApp, llamar en su nombre o borrar citas va siempre en dos pasos: primero lo preparas "
         "y le dices en voz alta a quién va y qué dice; solo cuando en su siguiente mensaje diga que "
@@ -1571,13 +1588,15 @@ def _parse_order_date(value: Optional[str]) -> Optional[datetime]:
 
 async def morning_briefing():
     """Resumen de la mañana al iPhone: agenda, correo, tienda, coche y tiempo."""
-    fuel, tires, temp, events, unread, sales, orders = await asyncio.gather(
+    fuel, tires, temp, events, unread, sales, orders, health = await asyncio.gather(
         _safe(_get_fuel_status), _safe(_get_tire_status), _safe(_temperature), _safe(_events_today),
         _safe(google_services.count_unread),
         _safe(lambda: store.sales_summary("yesterday", TIMEZONE) if store.is_configured() else None),
-        _safe(_pending_orders),
+        _safe(_pending_orders), _safe(_health_today),
     )
     parts = [f"Buenos días, {OWNER_NAME}."]
+    if health and health_sentence(health):
+        parts.append(health_sentence(health))
     if events is not None:
         timed = [e for e in events if not e["all_day"]]
         if timed:
@@ -1601,6 +1620,35 @@ async def morning_briefing():
     if problems:
         parts.append(f"Ojo con las ruedas: {'; '.join(problems)}.")
     await alert("Buenos días", " ".join(parts))
+
+
+def _health_today() -> Optional[dict]:
+    if not whoop.is_configured():
+        return None
+    data = whoop.summary(include_workouts=False)
+    return data if (data["recovery"] or data["sleep"] or data["strain"]) else None
+
+
+def _sleep_text(minutes: int) -> str:
+    h, m = divmod(minutes, 60)
+    return f"{h} h {m:02d} min" if m else f"{h} h"
+
+
+def health_sentence(health: dict) -> str:
+    """Una frase de sueño y recuperación para el resumen de la mañana."""
+    bits = []
+    sleep, rec = health.get("sleep"), health.get("recovery")
+    if sleep and sleep.get("minutes_asleep"):
+        text = f"has dormido {_sleep_text(sleep['minutes_asleep'])}"
+        if sleep.get("minutes_needed"):
+            text += f" de las {_sleep_text(sleep['minutes_needed'])} que necesitabas"
+        bits.append(text)
+    if rec and rec.get("recovery_percent") is not None:
+        bits.append(f"tu recuperación está al {rec['recovery_percent']:.0f}%, en zona {rec['zone']}")
+    if not bits:
+        return ""
+    sentence = " y ".join(bits)
+    return sentence[0].upper() + sentence[1:] + "."
 
 
 async def store_closing():
@@ -2073,7 +2121,7 @@ async def actions(limit: int = 50):
 async def dashboard():
     """Todo lo que muestra el panel de la tablet, consultado en paralelo. Cada
     bloque es null si no está configurado o falló, y el panel lo oculta."""
-    fuel, locked, tires, temp, events, unread, sales, orders, pending, actions = await asyncio.gather(
+    fuel, locked, tires, temp, events, unread, sales, orders, pending, actions, health = await asyncio.gather(
         _safe(_get_fuel_status),
         _safe(_get_lock_status),
         _safe(_get_tire_status),
@@ -2084,6 +2132,7 @@ async def dashboard():
         _safe(_pending_orders),
         _safe(_pending_tasks),
         _safe(recent_actions),
+        _safe(_health_today),
     )
     car_block = None
     if fuel or locked is not None or tires:
@@ -2100,6 +2149,7 @@ async def dashboard():
         "updated_at": datetime.now(ZoneInfo(TIMEZONE)).isoformat(),
         "weather": {"temperature_c": temp} if temp is not None else None,
         "car": car_block,
+        "health": health,
         "calendar": events,
         "email": unread,
         "store": {"today": sales, "pending": orders} if (sales or orders) else None,
@@ -2111,7 +2161,7 @@ async def dashboard():
 
 # ── CONEXIONES (las hace Nacho desde el panel) ────────────────────────────────
 # Botón «Conexiones» del panel: Nacho conecta sus cuentas (Google, Mercedes,
-# tienda) iniciando sesión, o pega sus claves, sin pasárselas a nadie.
+# WHOOP, tienda) iniciando sesión, o pega sus claves, sin pasárselas a nadie.
 # Ver conexiones.py.
 
 class ConexionCampos(BaseModel):
@@ -2203,6 +2253,7 @@ async def test_conexion(service_id: str):
     checks = {
         "google": diagnostico.check_google,
         "mercedes": diagnostico.check_mercedes,
+        "whoop": diagnostico.check_whoop,
         "woocommerce": diagnostico.check_store,
         "shopify": diagnostico.check_store,
         "claude": diagnostico.check_claude,
@@ -2259,6 +2310,23 @@ async def mercedes_callback(state: str = "", code: str = "", error: str = ""):
         return _back_to_panel(origin, "mercedes", message)
     restart_soon()
     return _back_to_panel(result["origin"], "mercedes")
+
+
+@app.get("/api/conexiones/whoop/callback", include_in_schema=False)
+async def whoop_callback(state: str = "", code: str = "", error: str = ""):
+    origin = conexiones.pending_origin(state, "whoop")
+    if not origin:
+        return _oauth_error_page("El enlace ha caducado o no es válido.")
+    if error or not code:
+        conexiones.cancel(state)
+        return _back_to_panel(origin, "whoop", "Has cancelado el permiso de WHOOP.")
+    try:
+        await asyncio.to_thread(conexiones.finish_whoop, state, code)
+    except Exception as e:
+        logger.exception("No se pudo completar la conexión con WHOOP")
+        message = str(e) if isinstance(e, conexiones.ConexionError) else "WHOOP no ha aceptado la conexión."
+        return _back_to_panel(origin, "whoop", message)
+    return _back_to_panel(origin, "whoop")
 
 
 # La llama la propia tienda (no el navegador) para entregar la clave de solo lectura.

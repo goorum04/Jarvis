@@ -17,6 +17,15 @@ const time = (iso, timeZone) => {
 const money = (amount, currency) =>
   new Intl.NumberFormat('es-ES', { style: 'currency', currency: currency || 'EUR' }).format(amount || 0);
 
+// Los mismos colores con los que la app de WHOOP muestra la recuperación.
+const ZONE_COLORS = { verde: '#16ec06', amarilla: '#ffde00', roja: '#ff0026' };
+
+const hoursText = (minutes) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+};
+
 const TIRE_ORDER = [['front_left', 'DI'], ['front_right', 'DD'], ['rear_left', 'TI'], ['rear_right', 'TD']];
 
 // Una línea legible para cada acción del registro.
@@ -67,7 +76,10 @@ const DashboardPanel = ({ refreshKey }) => {
     );
   }
 
-  const { weather, car, calendar, email, store, tasks, actions, budget, timezone } = data;
+  const { weather, car, health, calendar, email, store, tasks, actions, budget, timezone } = data;
+  const recovery = health && health.recovery;
+  const sleep = health && health.sleep;
+  const strain = health && health.strain;
   const tireProblems = (car && car.tire_problems) || [];
 
   return (
@@ -114,6 +126,45 @@ const DashboardPanel = ({ refreshKey }) => {
           </Card>
         )}
       </div>
+
+      {health && (
+        <Card
+          title="SALUD · WHOOP"
+          accent={recovery ? ZONE_COLORS[recovery.zone] : '#00d4ff'}
+          testId="card-health"
+        >
+          <div style={styles.healthRow}>
+            {recovery && (
+              <div>
+                <div style={{ ...styles.big, color: ZONE_COLORS[recovery.zone] }}>{Math.round(recovery.recovery_percent)}%</div>
+                <div style={styles.muted}>recuperación</div>
+              </div>
+            )}
+            {sleep && sleep.minutes_asleep != null && (
+              <div>
+                <div style={styles.big}>{hoursText(sleep.minutes_asleep)}</div>
+                <div style={styles.muted}>
+                  dormidas{sleep.minutes_needed ? ` de ${hoursText(sleep.minutes_needed)}` : ''}
+                </div>
+              </div>
+            )}
+            {strain && strain.strain != null && (
+              <div>
+                <div style={styles.big}>{strain.strain.toFixed(1).replace('.', ',')}</div>
+                <div style={styles.muted}>esfuerzo hoy</div>
+              </div>
+            )}
+          </div>
+          {recovery && (
+            <div style={styles.tires}>
+              {recovery.hrv_ms != null && <span>VFC {recovery.hrv_ms} ms</span>}
+              {recovery.resting_heart_rate != null && <span>Reposo {recovery.resting_heart_rate} ppm</span>}
+              {sleep && sleep.performance_percent != null && <span>Sueño {Math.round(sleep.performance_percent)}%</span>}
+              {strain && strain.kcal != null && <span>{strain.kcal} kcal</span>}
+            </div>
+          )}
+        </Card>
+      )}
 
       {calendar && (
         <Card title="AGENDA DE HOY" testId="card-calendar">
@@ -258,6 +309,11 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  healthRow: {
+    display: 'flex',
+    gap: '22px',
+    flexWrap: 'wrap',
   },
   tires: {
     display: 'flex',

@@ -5,7 +5,7 @@ y hablan a través de Siri y de Atajos de iOS; una tablet en casa u oficina
 hace de panel permanente. Esta guía cubre lo que hay que hacer una sola vez.
 
 Cada parte funciona por separado: si algo no está configurado, JARVIS
-simplemente no lo menciona. Orden recomendado: del 1 al 11.
+simplemente no lo menciona. Orden recomendado: del 1 al 12.
 
 **Después de cada paso**, ejecutar en el Mac:
 
@@ -24,7 +24,7 @@ en `TU_DIRECCIÓN/api/status` con el token.
 Nacho no tiene que pasarle claves ni contraseñas a nadie. En el panel de
 JARVIS (paso 9) hay un botón **CONEXIONES**:
 
-- **Gmail, Calendar y Docs**, **Mercedes me** y **WooCommerce**: pulsa
+- **Gmail, Calendar y Docs**, **Mercedes me**, **pulsera WHOOP** y **WooCommerce**: pulsa
   *Conectar*, inicia sesión con su propia cuenta y acepta. Se vuelve solo al
   panel.
 - **Claude, voz, avisos, mapas, Shopify y llamadas**: pega su clave en el
@@ -36,7 +36,8 @@ reinicia solo en unos segundos para aplicarlas. Con *Probar* se comprueba
 cada conexión contra el servicio real, y con *Desconectar* se retira.
 
 Quien instala solo prepara una vez la «identidad» de la app en Google
-(paso 2) y en Mercedes (paso 4): el apartado *Preparación* de esas tarjetas.
+(paso 2), en Mercedes (paso 4) y en WHOOP (paso 12): el apartado
+*Preparación* de esas tarjetas.
 
 ---
 
@@ -403,6 +404,32 @@ por minuto, entre Twilio y ElevenLabs.
 número, se da de alta en ElevenLabs (*Agents → Phone numbers → Import → SIP
 trunk*), se pone su ID en `ELEVENLABS_PHONE_NUMBER_ID` y `CALL_PROVIDER=sip_trunk`.
 JARVIS llamaría entonces con ese número.
+
+## 12. La pulsera WHOOP
+
+JARVIS lee de su WHOOP la recuperación de hoy, cómo ha dormido, el esfuerzo
+del día y sus entrenamientos. Se lo cuenta en el resumen de la mañana, lo
+muestra en el panel (tarjeta *SALUD*) y le responde si pregunta «¿cómo he
+dormido?» o «¿me conviene entrenar fuerte hoy?». Solo lee: no cambia nada en
+su cuenta, y no da consejos médicos.
+
+1. Entrar en <https://developer-dashboard.whoop.com> con una cuenta de WHOOP
+   (vale la de Nacho), crear un equipo si lo pide y después **Create App**:
+   - Nombre: `JARVIS`. Si pide una página o política de privacidad:
+     <https://goorum04.github.io/Jarvis/>.
+   - *Scopes*: `read:recovery`, `read:cycles`, `read:sleep`, `read:workout` y
+     `read:profile`.
+   - *Redirect URIs*:
+     - `http://localhost:8000/api/conexiones/whoop/callback`
+     - `https://TU_DIRECCIÓN/api/conexiones/whoop/callback` (Tailscale, paso 6)
+2. En el panel → **CONEXIONES** → *Pulsera WHOOP* → *Preparación*: pegar el
+   **Client ID** y el **Client Secret** y guardar.
+3. Nacho pulsa **Conectar**, entra con su cuenta de WHOOP y acepta.
+
+WHOOP renueva el permiso cada hora y cambia la clave de renovación cada vez:
+JARVIS guarda siempre la última él solo. Si alguna vez dejara de funcionar
+(por ejemplo, si Nacho retira el acceso desde WHOOP), basta con *Volver a
+conectar*.
 
 ## Protección
 

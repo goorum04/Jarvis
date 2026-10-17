@@ -5,11 +5,12 @@ import { apiBase, apiGet, apiPost } from './config';
 // y pega sus claves. Las claves van directas a su Mac; el panel nunca las
 // vuelve a ver, solo sabe si están puestas.
 
-const OWN_ACCOUNTS = ['google', 'mercedes', 'woocommerce', 'shopify'];
+const OWN_ACCOUNTS = ['google', 'mercedes', 'whoop', 'woocommerce', 'shopify'];
 
 const SERVICE_NAMES = {
   google: 'Gmail, Calendar y Docs',
   mercedes: 'Mercedes me',
+  whoop: 'la pulsera WHOOP',
   woocommerce: 'la tienda',
 };
 

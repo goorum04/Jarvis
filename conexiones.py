@@ -31,6 +31,7 @@ import httpx
 
 import car
 import google_services
+import whoop
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,15 @@ SERVICES = [
         ],
     },
     {
+        "id": "whoop", "name": "Pulsera WHOOP", "kind": "oauth",
+        "what": "Saber cómo ha dormido, su recuperación de hoy, el esfuerzo del día y sus entrenamientos.",
+        "setup": [
+            _field("WHOOP_CLIENT_ID", "Client ID de la app de WHOOP", secret=False),
+            _field("WHOOP_CLIENT_SECRET", "Client Secret de la app de WHOOP"),
+        ],
+        "fields": [],
+    },
+    {
         "id": "woocommerce", "name": "Tienda WooCommerce", "kind": "woo",
         "what": "Ventas, pedidos y avisos de la tienda (solo lectura).",
         "setup": [],
@@ -239,6 +249,8 @@ def _connected(service_id: str) -> bool:
         return google_services.is_configured()
     if service_id == "mercedes":
         return bool(_env("MERCEDES_REFRESH_TOKEN") and _env("MERCEDES_VIN"))
+    if service_id == "whoop":
+        return whoop.is_configured()
     if service_id == "woocommerce":
         return bool(_env("WOO_URL") and _env("WOO_CONSUMER_KEY") and _env("WOO_CONSUMER_SECRET"))
     if service_id == "shopify":
@@ -318,6 +330,8 @@ def disconnect(service_id: str) -> bool:
     keys = [f["env"] for f in service["fields"]]
     if service_id == "mercedes":
         keys = ["MERCEDES_REFRESH_TOKEN"]
+    elif service_id == "whoop":
+        keys = ["WHOOP_REFRESH_TOKEN"]
     elif service_id == "woocommerce":
         keys += ["WOO_CONSUMER_KEY", "WOO_CONSUMER_SECRET"]
     elif service_id == "llamadas":
@@ -326,7 +340,7 @@ def disconnect(service_id: str) -> bool:
         keys.append("STORE_PLATFORM")
     clear_env(keys)
     _set_meta(service_id, None)
-    return True
+    return service_id != "whoop"  # WHOOP lee su permiso al momento: no hace falta reiniciar
 
 
 # ── «Conectar»: inicio y vuelta del inicio de sesión ─────────────────────────
@@ -395,6 +409,14 @@ def start(service_id: str, origin: str) -> str:
             "scope": car.SCOPES, "state": state, "prompt": "consent",
         })
 
+    if service_id == "whoop":
+        redirect_uri = f"{base}/api/conexiones/whoop/callback"
+        state = _new_pending("whoop", redirect_uri=redirect_uri, origin=base)
+        return f"{whoop.AUTH_URL}?" + urlencode({
+            "response_type": "code", "client_id": _env("WHOOP_CLIENT_ID"), "redirect_uri": redirect_uri,
+            "scope": whoop.SCOPES, "state": state,
+        })
+
     # WooCommerce: la tienda manda la clave por su cuenta a JARVIS, por internet,
     # así que hace falta la dirección pública con HTTPS (Tailscale).
     store = _env("WOO_URL")
@@ -447,6 +469,24 @@ def finish_mercedes(state: str, code: str) -> dict:
         raise ConexionError("Mercedes no ha dado un permiso permanente (falta offline_access en los permisos).")
     save_env({"MERCEDES_REFRESH_TOKEN": refresh_token})
     _set_meta("mercedes", {"account": f"VIN …{_env('MERCEDES_VIN')[-6:]}"})
+    return {"origin": pending["origin"]}
+
+
+def finish_whoop(state: str, code: str) -> dict:
+    pending = _take_pending(state, "whoop")
+    try:
+        whoop.exchange_code(code, pending["redirect_uri"])
+    except whoop.WhoopNotConfigured as e:
+        raise ConexionError(str(e))
+    except httpx.HTTPError:
+        raise ConexionError("WHOOP no ha aceptado la conexión. Vuelve a intentarlo en unos minutos.")
+    account = None
+    try:
+        info = whoop.profile()
+        account = info["name"] or info["email"]
+    except Exception as e:
+        logger.warning(f"WHOOP conectada, pero no se pudo leer el perfil: {e}")
+    _set_meta("whoop", {"account": account})
     return {"origin": pending["origin"]}
 
 
