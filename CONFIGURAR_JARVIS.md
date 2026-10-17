@@ -19,6 +19,25 @@ créditos) y dice qué funciona, qué falta y cómo arreglarlo. Con
 `--probar-avisos` manda además un aviso de prueba al iPhone. Lo mismo se ve
 en `TU_DIRECCIÓN/api/status` con el token.
 
+### Lo conecta Nacho desde el panel
+
+Nacho no tiene que pasarle claves ni contraseñas a nadie. En el panel de
+JARVIS (paso 9) hay un botón **CONEXIONES**:
+
+- **Gmail, Calendar y Docs**, **Mercedes me** y **WooCommerce**: pulsa
+  *Conectar*, inicia sesión con su propia cuenta y acepta. Se vuelve solo al
+  panel.
+- **Claude, voz, avisos, mapas, Shopify y llamadas**: pega su clave en el
+  formulario y pulsa *Guardar*. Cada tarjeta tiene el enlace a dónde se saca.
+
+Las claves van de su navegador directamente al `.env` de su Mac. El panel
+nunca las vuelve a mostrar (solo pone «guardada»). Tras guardar, JARVIS se
+reinicia solo en unos segundos para aplicarlas. Con *Probar* se comprueba
+cada conexión contra el servicio real, y con *Desconectar* se retira.
+
+Quien instala solo prepara una vez la «identidad» de la app en Google
+(paso 2) y en Mercedes (paso 4): el apartado *Preparación* de esas tarjetas.
+
 ---
 
 ## 1. El Mac
@@ -74,20 +93,26 @@ Se hace en <https://console.cloud.google.com> con la cuenta de Gmail de Nacho.
      Si se queda en modo "Prueba", Google caduca el permiso cada 7 días y
      JARVIS dejaría de ver el correo.
 4. *APIs y servicios → Credenciales → Crear credenciales → ID de cliente de OAuth*:
-   tipo **Aplicación de escritorio**. Descargar el JSON, renombrarlo a
-   `google_credentials.json` y dejarlo en la carpeta de JARVIS.
-5. En el Mac: `./jarvis.sh google` (o, si el archivo ya está al instalar, lo
-   hace `instalar.command`). Se abre el navegador; Nacho entra
-   con su cuenta y acepta. Como la app es suya y no está verificada por
-   Google, saldrá un aviso: *Configuración avanzada → Ir a JARVIS*.
-   Queda guardado `google_token.json` y ya no hay que repetirlo.
+   tipo **Aplicación web**. En *URI de redireccionamiento autorizados*, añadir:
+   - `http://localhost:8000/api/conexiones/google/callback` (panel abierto en el Mac)
+   - `https://TU_DIRECCIÓN/api/conexiones/google/callback` (desde el iPhone o la
+     tablet; `TU_DIRECCIÓN` es la de Tailscale, paso 6)
+5. En el panel → **CONEXIONES** → *Gmail, Calendar y Docs* → *Preparación*:
+   pegar el **ID de cliente** y el **secreto del cliente** y guardar.
+6. Nacho pulsa **Conectar**, entra con su cuenta y acepta todos los permisos.
+   Como la app es suya y no está verificada por Google, saldrá un aviso:
+   *Configuración avanzada → Ir a JARVIS*. Queda guardado `google_token.json`
+   y ya no hay que repetirlo.
 
-Ninguno de esos dos archivos se sube al repositorio (están en `.gitignore`).
+Alternativa sin panel: un cliente tipo **Aplicación de escritorio**, su JSON
+renombrado a `google_credentials.json` en la carpeta de JARVIS, y
+`./jarvis.sh google` en el Mac.
+
+Ni las claves ni esos archivos se suben al repositorio (están en `.gitignore`).
 
 Los documentos se crean en su Drive y JARVIS solo tiene acceso a los que crea
 él, no al resto de su Drive. Si Google se autorizó antes de existir esta
-función, `el diagnóstico lo indica: basta con volver a ejecutar
-`./jarvis.sh google`.
+función, el diagnóstico lo indica: basta con pulsar *Volver a conectar*.
 
 ## 3. Tráfico y navegación
 
@@ -100,11 +125,24 @@ rutas para las citas que tienen lugar y como mucho cada 15 minutos.
 
 ## 4. El Mercedes
 
-1. Registrarse en <https://developer.mercedes-benz.com> y crear una app con
-   acceso a la **Vehicle Status API** para el VIN del C63.
-2. Completar el flujo OAuth de Mercedes para obtener un *refresh token*.
-3. Rellenar en `.env`: `MERCEDES_CLIENT_ID`, `MERCEDES_CLIENT_SECRET`,
-   `MERCEDES_REFRESH_TOKEN` y `MERCEDES_VIN`.
+1. Registrarse en <https://developer.mercedes-benz.com> y crear un proyecto
+   con acceso a la **Vehicle Status API** (combustible, cierre, estado y
+   neumáticos). Página que explica el proyecto («URL de propósito»):
+   <https://goorum04.github.io/Jarvis/>.
+2. En el proyecto, como *URL de redirección*, añadir:
+   - `http://localhost:8000/api/conexiones/mercedes/callback`
+   - `https://TU_DIRECCIÓN/api/conexiones/mercedes/callback` (cuando ya
+     esté Tailscale, paso 6)
+3. En el panel → **CONEXIONES** → *Mercedes me* → *Preparación*: pegar el
+   **Client ID** y el **Client Secret** y guardar.
+4. Nacho escribe el **VIN** (campo E del permiso de circulación), guarda y
+   pulsa **Conectar**: entra con su cuenta de Mercedes me y acepta. JARVIS
+   guarda el permiso (`MERCEDES_REFRESH_TOKEN`) y lo renueva solo.
+
+Si el portal indica otras direcciones de inicio de sesión o otros permisos,
+se cambian en el `.env` sin tocar el código: `MERCEDES_AUTH_URL`,
+`MERCEDES_TOKEN_URL` y `MERCEDES_SCOPES` (separados por espacios; tiene que
+incluir `offline_access` para que el permiso no caduque).
 
 Los nombres exactos de los campos de esa API hay que confirmarlos con su
 documentación (ver el comentario al principio de `car.py`). Si alguno no
@@ -120,14 +158,19 @@ en Andorra para ese coche, esta parte no se podrá usar.
 
 Con permisos **solo de lectura**: JARVIS consulta ventas y pedidos, no toca nada.
 
+- **WooCommerce** (desde el panel, sin copiar claves): **CONEXIONES** →
+  *Tienda WooCommerce* → escribir la dirección de la tienda, guardar y pulsar
+  **Conectar**. Se abre su propia tienda: entra como administrador y aprueba
+  el acceso de **lectura**; WooCommerce le entrega la clave directamente a
+  JARVIS. Necesita la dirección pública de Tailscale activa (paso 6).
+  A mano: *WooCommerce → Ajustes → Avanzado → API REST → Añadir clave*,
+  permisos **Lectura**, y en `.env` `STORE_PLATFORM=woocommerce`, `WOO_URL`,
+  `WOO_CONSUMER_KEY`, `WOO_CONSUMER_SECRET`.
 - **Shopify**: *Configuración → Apps y canales de venta → Desarrollar apps →
   Crear una app* → permisos de Admin API: `read_orders` y `read_products`
   (este último para el aviso de stock bajo) → instalar y copiar el
-  *token de acceso de Admin API*. En `.env`: `STORE_PLATFORM=shopify`,
-  `SHOPIFY_SHOP=sutienda.myshopify.com`, `SHOPIFY_ACCESS_TOKEN=...`.
-- **WooCommerce**: *WooCommerce → Ajustes → Avanzado → API REST → Añadir clave*,
-  permisos **Lectura**. En `.env`: `STORE_PLATFORM=woocommerce`, `WOO_URL`,
-  `WOO_CONSUMER_KEY`, `WOO_CONSUMER_SECRET`.
+  *token de acceso de Admin API*. Pegarlo en el panel → **CONEXIONES** →
+  *Tienda Shopify* junto con la dirección `sutienda.myshopify.com`.
 
 ## 6. Acceso desde fuera de casa
 
@@ -308,6 +351,9 @@ hablar. En la tablet, *Añadir a pantalla de inicio* para que se abra a
 pantalla completa.
 
 El registro completo de acciones está también en `/api/actions`.
+
+Abajo, el botón **CONEXIONES** abre la sección donde Nacho conecta sus
+cuentas y pega sus claves (ver el principio de esta guía).
 
 ## 10. Una voz propia para JARVIS
 

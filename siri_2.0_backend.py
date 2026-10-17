@@ -4,12 +4,16 @@ JARVIS 2.0 - Backend con agente, memoria persistente y recordatorios proactivos
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 import asyncio
+import html
 import json
 import os
 import re
 import sqlite3
+import sys
+from urllib.parse import urlencode
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -24,16 +28,19 @@ from typing import AsyncIterator, Optional
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from rag import retrieve_context
-import car
-import google_services
-import maps
-import notifier
-import phone_calls
-import store
-import weather
-
+# Antes de los módulos propios: algunos leen su configuración al importarse.
 load_dotenv()
+
+from rag import retrieve_context  # noqa: E402
+import car  # noqa: E402
+import conexiones  # noqa: E402
+import google_services  # noqa: E402
+import maps  # noqa: E402
+import notifier  # noqa: E402
+import phone_calls  # noqa: E402
+import store  # noqa: E402
+import weather  # noqa: E402
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -2102,6 +2109,169 @@ async def dashboard():
     }
 
 
+# ── CONEXIONES (las hace Nacho desde el panel) ────────────────────────────────
+# Botón «Conexiones» del panel: Nacho conecta sus cuentas (Google, Mercedes,
+# tienda) iniciando sesión, o pega sus claves, sin pasárselas a nadie.
+# Ver conexiones.py.
+
+class ConexionCampos(BaseModel):
+    values: dict[str, str] = {}
+
+
+class ConexionInicio(BaseModel):
+    origin: str
+
+
+def _restart_jarvis() -> None:
+    logger.info("Reiniciando JARVIS para aplicar las conexiones nuevas…")
+    os.execv(sys.executable, sys.orig_argv)
+
+
+def restart_soon(delay: float = 1.5) -> None:
+    """Las claves se leen al arrancar: tras cambiarlas, JARVIS se reinicia solo
+    (después de responder, para que el panel reciba la respuesta)."""
+    asyncio.get_running_loop().call_later(delay, _restart_jarvis)
+
+
+def _conexion_error(e: Exception) -> HTTPException:
+    if isinstance(e, conexiones.ConexionError):
+        return HTTPException(status_code=400, detail=str(e))
+    logger.exception("Error en una conexión")
+    return HTTPException(status_code=500, detail="Algo ha fallado. Inténtalo de nuevo en un momento.")
+
+
+def _back_to_panel(origin: str, service: str, error: str = "") -> RedirectResponse:
+    query = urlencode({"conexion": service, "estado": "error" if error else "ok", **({"mensaje": error} if error else {})})
+    return RedirectResponse(f"{origin}/?{query}#conexiones", status_code=303)
+
+
+def _oauth_error_page(message: str) -> HTMLResponse:
+    return HTMLResponse(
+        f"<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
+        f"<body style='font-family:-apple-system,sans-serif;padding:24px;background:#0a0a0a;color:#cfefff'>"
+        f"<h2>No se ha podido conectar</h2><p>{html.escape(message)}</p>"
+        f"<p>Vuelve al panel de JARVIS y pulsa «Conectar» otra vez.</p></body>",
+        status_code=400,
+    )
+
+
+@app.get("/api/conexiones", dependencies=[Depends(require_token)])
+async def list_conexiones():
+    return {"services": conexiones.list_services(), "public_url": os.getenv("PUBLIC_URL", "")}
+
+
+@app.post("/api/conexiones/llamadas/preparar", dependencies=[Depends(require_token)])
+async def prepare_calls():
+    ok, output = await asyncio.to_thread(conexiones.prepare_calls)
+    restart_soon()
+    return {"ok": ok, "output": output, "restarting": True}
+
+
+@app.post("/api/conexiones/{service_id}/guardar", dependencies=[Depends(require_token)])
+async def save_conexion(service_id: str, body: ConexionCampos):
+    try:
+        changed = conexiones.save_fields(service_id, body.values)
+    except Exception as e:
+        raise _conexion_error(e)
+    if changed:
+        restart_soon()
+    return {"ok": True, "restarting": changed}
+
+
+@app.post("/api/conexiones/{service_id}/iniciar", dependencies=[Depends(require_token)])
+async def start_conexion(service_id: str, body: ConexionInicio):
+    try:
+        return {"url": conexiones.start(service_id, body.origin)}
+    except Exception as e:
+        raise _conexion_error(e)
+
+
+@app.post("/api/conexiones/{service_id}/desconectar", dependencies=[Depends(require_token)])
+async def disconnect_conexion(service_id: str):
+    try:
+        changed = conexiones.disconnect(service_id)
+    except Exception as e:
+        raise _conexion_error(e)
+    if changed:
+        restart_soon()
+    return {"ok": True, "restarting": changed}
+
+
+@app.post("/api/conexiones/{service_id}/probar", dependencies=[Depends(require_token)])
+async def test_conexion(service_id: str):
+    import diagnostico
+    checks = {
+        "google": diagnostico.check_google,
+        "mercedes": diagnostico.check_mercedes,
+        "woocommerce": diagnostico.check_store,
+        "shopify": diagnostico.check_store,
+        "claude": diagnostico.check_claude,
+        "voz": diagnostico.check_voice,
+        "avisos": lambda: diagnostico.check_notifications(True),
+        "mapas": diagnostico.check_maps,
+        "llamadas": diagnostico.check_calls,
+    }
+    if service_id not in checks:
+        raise HTTPException(status_code=404, detail="Esa conexión no existe.")
+    try:
+        outcome = await asyncio.to_thread(checks[service_id])
+    except Exception as e:
+        outcome = {"name": service_id, "status": diagnostico.FALLO, "detail": str(e)[:200], "fix": ""}
+    results = outcome if isinstance(outcome, list) else [outcome]
+    return {"ok": all(r["status"] == diagnostico.OK for r in results), "results": results}
+
+
+# Vuelta del inicio de sesión: la abre el navegador de Nacho, sin token. Lo que
+# la protege es el «state» de un solo uso que se creó al pulsar «Conectar».
+@app.get("/api/conexiones/google/callback", include_in_schema=False)
+async def google_callback(state: str = "", code: str = "", error: str = ""):
+    origin = conexiones.pending_origin(state, "google")
+    if not origin:
+        return _oauth_error_page("El enlace ha caducado o no es válido.")
+    if error or not code:
+        conexiones.cancel(state)
+        return _back_to_panel(origin, "google", "Has cancelado el permiso de Google.")
+    try:
+        result = await asyncio.to_thread(conexiones.finish_google, state, code)
+    except Exception as e:
+        logger.exception("No se pudo completar la conexión con Google")
+        message = str(e) if isinstance(e, conexiones.ConexionError) else "Google no ha aceptado la conexión."
+        return _back_to_panel(origin, "google", message)
+    if result["missing_scopes"]:
+        return _back_to_panel(result["origin"], "google",
+                              "Conectado, pero sin todos los permisos: vuelve a conectar y deja marcadas todas las casillas.")
+    return _back_to_panel(result["origin"], "google")
+
+
+@app.get("/api/conexiones/mercedes/callback", include_in_schema=False)
+async def mercedes_callback(state: str = "", code: str = "", error: str = ""):
+    origin = conexiones.pending_origin(state, "mercedes")
+    if not origin:
+        return _oauth_error_page("El enlace ha caducado o no es válido.")
+    if error or not code:
+        conexiones.cancel(state)
+        return _back_to_panel(origin, "mercedes", "Has cancelado el permiso de Mercedes me.")
+    try:
+        result = await asyncio.to_thread(conexiones.finish_mercedes, state, code)
+    except Exception as e:
+        logger.exception("No se pudo completar la conexión con Mercedes")
+        message = str(e) if isinstance(e, conexiones.ConexionError) else "Mercedes no ha aceptado la conexión."
+        return _back_to_panel(origin, "mercedes", message)
+    restart_soon()
+    return _back_to_panel(result["origin"], "mercedes")
+
+
+# La llama la propia tienda (no el navegador) para entregar la clave de solo lectura.
+@app.post("/api/conexiones/woocommerce/callback", include_in_schema=False)
+async def woocommerce_callback(payload: dict):
+    try:
+        conexiones.finish_woocommerce(payload)
+    except Exception as e:
+        raise _conexion_error(e)
+    restart_soon(3)
+    return {"ok": True}
+
+
 # ── PANEL DE LA TABLET ────────────────────────────────────────────────────────
 # El panel ya compilado se sirve desde aquí mismo: un solo programa, una sola
 # dirección (y así funciona igual en casa y a través de Tailscale). Va al final
@@ -2111,8 +2281,6 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 # Página pública que explica el proyecto (la «URL de propósito» que pide Mercedes).
 PROYECTO_DIR = Path(__file__).parent / "proyecto"
 if PROYECTO_DIR.is_dir():
-    from fastapi.responses import RedirectResponse
-
     @app.get("/proyecto", include_in_schema=False)
     async def proyecto_sin_barra():
         return RedirectResponse("/proyecto/")

@@ -1,9 +1,9 @@
 """
 Gmail y Google Calendar de la cuenta de Nacho.
 
-Se autoriza una sola vez ejecutando `python autorizar_google.py` en el PC
-(abre el navegador para dar permiso). El permiso queda en google_token.json
-y se renueva solo. Ver CONFIGURAR_JARVIS.md.
+Nacho lo conecta él mismo desde el panel (Conexiones → Gmail, Calendar y
+Docs → Conectar), o en el Mac con `python autorizar_google.py`. El permiso
+queda en google_token.json y se renueva solo. Ver CONFIGURAR_JARVIS.md.
 """
 import base64
 import html
@@ -51,7 +51,7 @@ def is_configured() -> bool:
 def _credentials() -> Credentials:
     if not TOKEN_FILE.exists():
         raise GoogleNotConfigured(
-            "Gmail y Calendar no están conectados todavía: hay que ejecutar autorizar_google.py en el PC."
+            "Gmail y Calendar no están conectados todavía: se conectan desde el panel de JARVIS, en Conexiones."
         )
     # Sin pasar SCOPES: así creds.scopes son los permisos que Nacho concedió de
     # verdad, y al renovar no se apuntan como concedidos permisos que no dio.
@@ -62,7 +62,7 @@ def _credentials() -> Credentials:
             TOKEN_FILE.write_text(creds.to_json())
         else:
             raise GoogleNotConfigured(
-                "El permiso de Google ha caducado: hay que volver a ejecutar autorizar_google.py."
+                "El permiso de Google ha caducado: hay que volver a conectarlo desde el panel, en Conexiones."
             )
     return creds
 
@@ -83,7 +83,7 @@ def _docs():
     # Quien autorizó antes de que existiera esta función no dio permiso de documentos.
     if DOCS_SCOPE not in (creds.scopes or []):
         raise GoogleNotConfigured(
-            "Para crear documentos hay que volver a ejecutar autorizar_google.py y aceptar el permiso nuevo."
+            "Para crear documentos hay que volver a conectar Google desde el panel (Conexiones) y aceptar el permiso nuevo."
         )
     return build("docs", "v1", credentials=creds, cache_discovery=False)
 

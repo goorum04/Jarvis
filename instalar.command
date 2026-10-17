@@ -179,10 +179,11 @@ if [[ -n "$PUBLIC_URL" ]]; then
   echo "  Panel (tablet):  $PUBLIC_URL/?token=$TOKEN"
   echo "  Para los Atajos: $PUBLIC_URL"
 else
-  echo "  Panel (en este Mac): http://127.0.0.1:$PORT/?token=$TOKEN"
+  echo "  Panel (en este Mac): http://localhost:$PORT/?token=$TOKEN"
 fi
 echo "  Token:           $TOKEN"
 echo
-echo "  Rellena las claves que falten en .env y aplica con: ./jarvis.sh reiniciar"
+echo "  Abre el panel y pulsa CONEXIONES: ahí Nacho conecta Gmail, Mercedes y"
+echo "  la tienda con su cuenta, y pega sus claves. No hace falta tocar el .env."
 echo "  Guía completa: CONFIGURAR_JARVIS.md"
 echo "════════════════════════════════════════════════════════════"

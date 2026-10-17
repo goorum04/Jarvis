@@ -6,9 +6,9 @@ cerrado.
 Requisitos para que esto funcione:
 1. Registrarse como desarrollador en https://developer.mercedes-benz.com
 2. Crear una app con acceso a la "Vehicle Status API" para el VIN del C63.
-3. Generar un refresh token (flujo OAuth2 estándar de Mercedes) y guardarlo
-   en MERCEDES_REFRESH_TOKEN dentro del .env, junto con MERCEDES_CLIENT_ID,
-   MERCEDES_CLIENT_SECRET y MERCEDES_VIN.
+3. Poner MERCEDES_CLIENT_ID y MERCEDES_CLIENT_SECRET en el .env (o en el
+   panel), y que Nacho pulse «Conectar» en Mercedes me desde la sección
+   Conexiones del panel: eso guarda MERCEDES_REFRESH_TOKEN y MERCEDES_VIN.
 
 IMPORTANTE: los nombres de recurso usados abajo (fuelstatus, doorlockstatus,
 fuelLevelPercent, rangeLiquid, doorLockStatusOverall, tires,
@@ -24,6 +24,7 @@ un nivel de combustible o un estado de cierre que no venga realmente del
 coche.
 """
 import logging
+import os
 import time
 from typing import Optional
 
@@ -31,11 +32,22 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-TOKEN_URL = "https://id.mercedes-benz.com/as/token.oauth2"
+# Inicio de sesión de Mercedes me (lo usa el botón «Conectar» del panel). Si el
+# portal de desarrolladores indica otras direcciones o permisos, se cambian en
+# el .env sin tocar el código.
+AUTH_URL = os.getenv("MERCEDES_AUTH_URL", "https://id.mercedes-benz.com/as/authorization.oauth2")
+TOKEN_URL = os.getenv("MERCEDES_TOKEN_URL", "https://id.mercedes-benz.com/as/token.oauth2")
+SCOPES = os.getenv(
+    "MERCEDES_SCOPES",
+    "mb:vehicle:mbdata:fuelstatus mb:vehicle:mbdata:vehiclelock mb:vehicle:mbdata:vehiclestatus offline_access",
+)
 API_BASE = "https://api.mercedes-benz.com/vehicledata/v2"
 
 _cached_access_token: Optional[str] = None
 _cached_token_expiry: float = 0.0
+# Si Mercedes entrega un refresh token nuevo al renovar, el anterior deja de
+# valer: se usa (y se guarda en el .env) el último recibido.
+_latest_refresh_token: Optional[str] = None
 
 
 def _get_access_token(client_id: str, client_secret: str, refresh_token: str) -> Optional[str]:
@@ -43,6 +55,8 @@ def _get_access_token(client_id: str, client_secret: str, refresh_token: str) ->
     if _cached_access_token and time.time() < _cached_token_expiry:
         return _cached_access_token
 
+    global _latest_refresh_token
+    refresh_token = _latest_refresh_token or refresh_token
     try:
         response = httpx.post(
             TOKEN_URL,
@@ -54,6 +68,11 @@ def _get_access_token(client_id: str, client_secret: str, refresh_token: str) ->
         data = response.json()
         _cached_access_token = data["access_token"]
         _cached_token_expiry = time.time() + data.get("expires_in", 3600) - 60
+        new_refresh = data.get("refresh_token")
+        if new_refresh and new_refresh != refresh_token:
+            _latest_refresh_token = new_refresh
+            import conexiones  # aquí para no importarse mutuamente al arrancar
+            conexiones.save_env({"MERCEDES_REFRESH_TOKEN": new_refresh})
         return _cached_access_token
     except Exception as e:
         logger.error(f"No se pudo renovar el token de Mercedes: {e}")

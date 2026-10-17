@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ConexionesPanel from './ConexionesPanel';
 import DashboardPanel from './DashboardPanel';
 import { wsUrl } from './config';
 
@@ -13,6 +14,8 @@ const JARVIS = () => {
   // Cambia cuando JARVIS termina de hablar: el panel se refresca por si algo cambió.
   const [refreshKey, setRefreshKey] = useState(0);
   const [waveIntensity, setWaveIntensity] = useState(0);
+  // Sección «Conexiones»: se abre con el botón o al volver de conectar una cuenta.
+  const [showConexiones, setShowConexiones] = useState(window.location.hash === '#conexiones');
 
   // Referencias
   const wsRef = useRef(null);
@@ -385,6 +388,17 @@ const JARVIS = () => {
             <span style={styles.statusText}>{getStatusText()}</span>
           </div>
 
+          <button
+            onClick={() => {
+              window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#conexiones`);
+              setShowConexiones(true);
+            }}
+            style={styles.conexionesButton}
+            data-testid="abrir-conexiones"
+          >
+            CONEXIONES
+          </button>
+
           {/* Botón limpiar */}
           <button
             onClick={() => {
@@ -398,6 +412,16 @@ const JARVIS = () => {
           </button>
         </div>
       </div>
+
+      {showConexiones && (
+        <ConexionesPanel
+          onClose={() => {
+            window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+            setShowConexiones(false);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
 
       {/* Estilos globales */}
       <style>{`
@@ -696,6 +720,17 @@ const styles = {
     fontWeight: 'bold',
     letterSpacing: '1px',
     transition: 'all 0.3s ease'
+  },
+  conexionesButton: {
+    padding: '8px 16px',
+    background: 'rgba(0,212,255,0.12)',
+    border: '1px solid #00d4ff',
+    color: '#00d4ff',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: 'bold',
+    letterSpacing: '1px',
   }
 };
 

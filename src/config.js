@@ -31,3 +31,16 @@ export const apiGet = async (path) => {
   }
   return response.json();
 };
+
+export const apiPost = async (path, body = {}) => {
+  const response = await fetch(`${apiBase}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.detail || `HTTP ${response.status}`);
+  }
+  return data;
+};

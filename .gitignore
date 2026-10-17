@@ -11,6 +11,8 @@ jarvis_memory.db
 # Credenciales y permiso de Google: nunca al repositorio
 google_credentials.json
 google_token.json
+# Con qué cuenta se conectó cada servicio (lo escribe el panel)
+conexiones.json
 
 # RAG: los documentos y el índice son propios de cada instalación/cliente
 docs/*
