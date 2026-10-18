@@ -9,6 +9,9 @@ cómo está según su pulsera WHOOP, sigue las ventas de su tienda online,
 llama a negocios en su nombre, busca en internet y le avisa por su cuenta cuando toca salir, llega
 algo importante o se acaba el stock.
 
+Ahora vive en su Mac; **más adelante pasará a la nube para estar activo 24/7**
+(ver [GUIA_INSTALACION.md](GUIA_INSTALACION.md#más-adelante-jarvis-en-la-nube-activo-247)).
+
 ## Instalar (en el Mac de Nacho)
 
 1. Copiar esta carpeta a su carpeta personal, por ejemplo `~/JARVIS`

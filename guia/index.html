@@ -72,6 +72,11 @@
     background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 14px;
   }
 
+  .future {
+    margin-top: 12px; background: var(--accent-soft); border-radius: 12px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .future .tag { font-size: 11px; letter-spacing: 2px; font-weight: 700; text-transform: uppercase; color: var(--accent); }
   .note { background: var(--warn-soft); border-radius: 12px; padding: 14px 16px; color: var(--text); }
   .note strong { color: var(--warn); }
   .alerts { display: flex; flex-direction: column; gap: 0; }
@@ -122,6 +127,12 @@
     <div class="note">
       <strong>Si cierras la tapa o te lo llevas,</strong> JARVIS descansa: Siri te dirá que hubo un problema con el atajo.
       No se pierde nada. Al volver a abrirlo, sigue solo y te da los recordatorios que hayan quedado pendientes.
+    </div>
+    <div class="future">
+      <span class="tag">Próximamente</span>
+      <p><strong>JARVIS pasará a la nube y estará activo 24 horas, los 7 días,</strong> aunque cierres el portátil o te lo lleves de viaje.
+        Para ti no cambiará nada: le hablarás igual, con el mismo «Oye Siri, JARVIS» y el mismo panel, y conservará
+        todo lo que sabe de ti y todas tus conexiones.</p>
     </div>
   </section>
 
@@ -295,7 +306,8 @@
   <section id="privacidad">
     <h2>Tu privacidad</h2>
     <ul>
-      <li><strong>Todo se guarda en tu Mac:</strong> tus claves, tus conversaciones y lo que JARVIS sabe de ti. No hay ninguna nube de JARVIS.</li>
+      <li><strong>Todo se guarda en tu Mac:</strong> tus claves, tus conversaciones y lo que JARVIS sabe de ti. Cuando pase a la nube,
+        se guardará en un servidor privado solo para ti, nunca compartido con nadie.</li>
       <li><strong>Las claves no se vuelven a ver:</strong> ni siquiera el panel las muestra después de guardarlas.</li>
       <li><strong>Para hacer su trabajo usa servicios externos</strong>, y a cada uno le envía solo lo necesario en ese momento:
         la inteligencia artificial (Claude) para entenderte y responder, ElevenLabs para la voz y las llamadas,

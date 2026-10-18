@@ -149,6 +149,36 @@ Detalle en CONFIGURAR §7 y §8. Hacen falta la dirección y el token del paso B
 
 ---
 
+## Más adelante: JARVIS en la nube, activo 24/7
+
+El plan es pasar JARVIS a la nube para que funcione siempre, aunque Nacho
+cierre el portátil o se lo lleve de viaje. Para él no cambiará nada: el mismo
+«Oye Siri, JARVIS», el mismo panel y la misma memoria.
+
+JARVIS ya está preparado para moverse: toda su configuración y sus datos
+están en su carpeta. Cuando llegue el momento:
+
+- [ ] **Servidor privado**, solo para Nacho, en Europa (por cercanía y por
+      protección de datos). El instalador actual es para Mac; para un servidor
+      Linux habrá que preparar su versión (arranque automático como servicio
+      del sistema).
+- [ ] **Copiar la carpeta entera** con lo que no está en el repositorio:
+      `.env` (claves), `google_token.json`, `conexiones.json` y
+      `jarvis_memory.db` (conversaciones, recordatorios y memoria).
+- [ ] **Dirección fija**: mejor con un dominio propio (por ejemplo
+      `jarvis.sudominio.com`), para que no vuelva a cambiar aunque se cambie de
+      servidor. Tailscale Funnel también funciona en un servidor.
+- [ ] **Actualizar la dirección** en las redirecciones de Google, Mercedes y
+      WHOOP, en los Atajos y automatizaciones del iPhone y en el panel de la
+      pantalla de inicio (y `PUBLIC_URL` en el `.env`).
+- [ ] **Actualizar la página del proyecto** (`proyecto/index.html`): ahora dice
+      que los datos se guardan en el ordenador del titular.
+- [ ] **Apagar JARVIS en el Mac** (`./jarvis.sh desinstalar`) en cuanto el del
+      servidor funcione: dos JARVIS a la vez mandarían los avisos repetidos y se
+      pisarían los permisos de WHOOP y Mercedes, que cambian en cada renovación.
+
+---
+
 ## Mantenimiento
 
 ```
