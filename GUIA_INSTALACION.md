@@ -71,7 +71,7 @@ pegarlo no borra lo que ya tenía.
   cuando lo haya pegado.
 
 Su guía le lleva por: Tailscale → la línea de la Terminal → el código → sus
-cuentas → Pushcut → el iPhone (QR del panel, atajos y automatizaciones de
+cuentas → el iPhone (QR del panel, icono en la pantalla de inicio, avisos, atajos y automatizaciones de
 CarPlay) → probarlo. Si algo falla, te mandará una foto de la pantalla.
 
 ### 5. Después
@@ -103,7 +103,7 @@ así pega él las claves en el panel y nadie más las tiene.
 | [Google Cloud](https://console.cloud.google.com) | Gmail, Calendar y Docs; tráfico y rutas | Gmail gratis; rutas por uso | Recomendado |
 | [Mercedes developer](https://developer.mercedes-benz.com) | Gasolina, cierre y ruedas | — | Opcional |
 | [WHOOP developer](https://developer-dashboard.whoop.com) | Sueño, recuperación y esfuerzo | — | Opcional |
-| [Pushcut](https://www.pushcut.io) (app del iPhone) | Avisos al iPhone | App gratis | Recomendado |
+| [Pushcut](https://www.pushcut.io) (app del iPhone) | Que Siri lea los avisos en voz alta | App gratis | Opcional (los avisos ya van sin él) |
 | [Twilio](https://www.twilio.com) | Número para las llamadas en su nombre | Número mensual + minutos | Opcional |
 | Su tienda (WooCommerce o Shopify) | Ventas y pedidos | Ya la tiene | Opcional |
 
@@ -175,7 +175,6 @@ conectada; con *Probar* se comprueba contra el servicio real.
       tienda), o Shopify pegando el token (CONFIGURAR §5).
 - [ ] **Casa y trabajo**: direcciones y coordenadas de casa.
 - [ ] **Tráfico y rutas**: la clave de Routes de la parte A.
-- [ ] **Avisos al iPhone**: el *Secret* de Pushcut (en el paso D.1).
 - [ ] **Llamadas**: datos de Twilio → *Guardar* → **Preparar llamadas**.
 
 Al guardar, JARVIS se reinicia solo unos segundos para aplicar los cambios.
@@ -184,17 +183,19 @@ Al guardar, JARVIS se reinicia solo unos segundos para aplicar los cambios.
 
 Detalle en CONFIGURAR §7 y §8. Hacen falta la dirección y el token del paso B.2 (también en el panel → Conexiones → Tu iPhone).
 
-- [ ] **1. Pushcut**: instalar la app, crear una notificación llamada `JARVIS` y
-      copiar el *Secret* (*Ajustes → API*) en Conexiones → Avisos.
-- [ ] **2. Atajo «JARVIS»** (CONFIGURAR §8.1), con ese nombre exacto para que
-      baste con decir «Oye Siri, JARVIS».
-- [ ] **3. Automatización CarPlay → Se conecta**: saludo al subir al coche (§8.2).
-- [ ] **4. Automatización CarPlay → Se desconecta**: aviso de coche abierto (§8.3).
-- [ ] **5. Anunciar notificaciones** en CarPlay, con WhatsApp y Pushcut activados (§7 y §8.4).
-- [ ] **6. Atajos de casa y música**, opcional: crearlos y poner sus nombres en
+- [ ] **1. JARVIS en la pantalla de inicio**: en el panel del Mac, *Conexiones →
+      Tu iPhone*, escanear el QR con la cámara del iPhone → Safari → Compartir →
+      *Añadir a pantalla de inicio*. Igual en la tablet. Desde ahí, abrirlo siempre por el icono.
+- [ ] **2. Avisos**: desde el icono → *Conexiones → Avisos en este dispositivo* →
+      *Activar avisos aquí* → *Permitir* (iOS 16.4 o posterior). Pushcut, solo si
+      se quiere que Siri los lea en voz alta (CONFIGURAR §7).
+- [ ] **3. Atajo «JARVIS»** (CONFIGURAR §8.1), con ese nombre exacto para que
+      baste con decir «Oye Siri, JARVIS». O el compartido de la instalación a distancia.
+- [ ] **4. Automatización CarPlay → Se conecta**: saludo al subir al coche (§8.2).
+- [ ] **5. Automatización CarPlay → Se desconecta**: aviso de coche abierto (§8.3).
+- [ ] **6. Anunciar notificaciones** en CarPlay, con WhatsApp activado (§8.4).
+- [ ] **7. Atajos de casa y música**, opcional: crearlos y poner sus nombres en
       `IPHONE_SHORTCUTS` en el `.env` (§8.1), y `./jarvis.sh reiniciar`.
-- [ ] **7. Panel en la pantalla de inicio**: abrir en Safari el enlace del panel
-      (con `?token=`) → Compartir → *Añadir a pantalla de inicio*. Igual en la tablet.
 
 ## E. Comprobar
 
@@ -269,5 +270,5 @@ Todo se hace desde la carpeta `~/JARVIS`. Actualizar no borra claves, conexiones
 | El correo deja de funcionar a los 7 días | Pantalla de consentimiento de Google en modo «Prueba» | Publicarla (CONFIGURAR §2) y *Volver a conectar* |
 | Conectar la tienda WooCommerce no deja | Falta la dirección pública activa | Terminar B.2 (Funnel) |
 | El panel dice «no tiene el acceso de JARVIS» | Abierto sin el token | Abrir el enlace con `?token=` del instalador |
-| Los avisos no llegan | Pushcut sin conectar o notificaciones desactivadas | Conexiones → Avisos → *Probar*; revisar los ajustes del iPhone |
+| Los avisos no llegan | Avisos sin activar en ese dispositivo, o bloqueados | Desde el icono: Conexiones → *Avisos en este dispositivo*; revisar Ajustes → Notificaciones → JARVIS |
 | Los datos del coche no salen | Nombres de campos de Mercedes distintos | `./jarvis.sh logs` muestra el JSON de Mercedes; ajustar `car.py` (CONFIGURAR §4) |

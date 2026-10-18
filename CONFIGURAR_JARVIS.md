@@ -225,10 +225,15 @@ JARVIS vigila por su cuenta y avisa al iPhone de:
 - **Cierre de la tienda** (`STORE_CLOSE_TIME`, 21:30): pedidos, facturación y
   ticket medio del día.
 
-Para recibirlos, una de las dos:
+Para recibirlos:
 
-- **Pushcut** (recomendada): instalar la app, crear una notificación llamada
-  `JARVIS` y copiar en `.env` el *Secret* (*Ajustes → API*). Para que se oiga:
+- **Avisos propios de JARVIS** (lo más sencillo, sin apps aparte): abrir el
+  panel desde su icono en la pantalla de inicio (paso 9) → **CONEXIONES** →
+  *Avisos en este dispositivo* → *Activar avisos aquí*. Llegan con el icono de
+  JARVIS. En el iPhone hace falta iOS 16.4 o posterior y abrirlo desde el icono.
+- **Pushcut** (opcional, si se quiere que los lea en voz alta): instalar la app, crear una notificación llamada
+  `JARVIS` y pegar el *Secret* (*Ajustes → API*) en Conexiones → *Avisos por
+  Pushcut o ntfy*. Para que se oiga:
   - En el coche: si Pushcut aparece en *Ajustes → Notificaciones → Anunciar
     notificaciones*, activarlo; Siri leerá los avisos por CarPlay.
   - Fuera del coche: en la notificación `JARVIS` de Pushcut, añadir como
@@ -322,15 +327,13 @@ ruta desde donde está de verdad (si no, usa casa).
 Atajos → *Automatización* → **CarPlay** → *Se desconecta* → *Ejecutar inmediatamente*:
 
 ```
-Esperar 60 segundos
-Obtener contenido de URL  TU_DIRECCIÓN/api/car/status  (GET, misma cabecera)
-Obtener valor del diccionario  locked
-Si [locked] es falso
-    Mostrar notificación: "El coche está abierto. Ciérralo desde Mercedes me."
+Obtener contenido de URL  TU_DIRECCIÓN/api/car/left  (POST, misma cabecera)
 ```
 
-La API de Mercedes solo permite consultar el cierre, no cerrar. Si `locked`
-viene vacío (no se pudo consultar), no avisa: nunca da una alarma falsa.
+JARVIS espera un minuto él mismo, consulta el cierre y, si el coche está
+abierto, avisa al iPhone («Te has dejado el coche abierto…»). El iPhone no
+tiene que esperar nada. La API de Mercedes solo permite consultar el cierre,
+no cerrar. Si no se pudo consultar, no avisa: nunca da una alarma falsa.
 
 ### 8.4 WhatsApp entrantes en el coche
 
@@ -347,6 +350,11 @@ tablet, abrir una vez `TU_DIRECCIÓN/?token=TOKEN` (el instalador muestra el
 enlace completo al final); el navegador recuerda el token. Funciona en casa,
 en la oficina o donde sea, y por HTTPS, que el navegador exige para usar el
 micrófono.
+
+**Como una app:** en el iPhone o la tablet, *Compartir → Añadir a pantalla de
+inicio*. Queda con su icono, se abre a pantalla completa y ya entra con su
+acceso. En el iPhone se ve en una columna, con el micrófono fijo abajo. Si el
+Mac no responde, enseña «JARVIS está descansando» en vez de un error.
 
 A la izquierda, la conversación (botón de micrófono). A la derecha, en vivo:
 tiempo; depósito, cierre y presión de cada rueda del coche; agenda de hoy;

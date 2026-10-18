@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="fondo" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#0d2230"/>
+      <stop offset="100%" stop-color="#05080c"/>
+    </radialGradient>
+    <radialGradient id="nucleo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="45%" stop-color="#bff3ff"/>
+      <stop offset="100%" stop-color="#25c8f2"/>
+    </radialGradient>
+    <filter id="brillo" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#fondo)"/>
+  <g transform="translate(256 256) scale(var(--escala, 1))">
+    <circle r="168" fill="none" stroke="#25c8f2" stroke-width="14" opacity="0.55" filter="url(#brillo)"/>
+    <circle r="168" fill="none" stroke="#25c8f2" stroke-width="8"/>
+    <circle r="132" fill="none" stroke="#25c8f2" stroke-width="22" stroke-dasharray="52 17.1" opacity="0.75" transform="rotate(-90)"/>
+    <circle r="96" fill="none" stroke="#25c8f2" stroke-width="3" opacity="0.6"/>
+    <circle r="70" fill="#25c8f2" opacity="0.6" filter="url(#brillo)"/>
+    <circle r="60" fill="url(#nucleo)"/>
+  </g>
+</svg>

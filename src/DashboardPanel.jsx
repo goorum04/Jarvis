@@ -70,7 +70,7 @@ const DashboardPanel = ({ refreshKey }) => {
 
   if (!data) {
     return (
-      <div style={styles.panel}>
+      <div style={styles.panel} className="j-dash">
         <div style={styles.muted}>{error ? 'No se puede conectar con JARVIS.' : 'Cargando…'}</div>
       </div>
     );
@@ -83,7 +83,7 @@ const DashboardPanel = ({ refreshKey }) => {
   const tireProblems = (car && car.tire_problems) || [];
 
   return (
-    <div style={styles.panel} data-testid="dashboard">
+    <div style={styles.panel} className="j-dash" data-testid="dashboard">
       <div style={styles.cardRow}>
         {weather && (
           <Card title="EXTERIOR" testId="card-weather" grow>

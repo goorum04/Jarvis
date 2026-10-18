@@ -273,29 +273,29 @@ const JARVIS = () => {
   };
 
   return (
-    <div style={styles.container}>
+    <div style={styles.container} className="j-container">
       {/* Fondo animado */}
-      <div style={styles.background}>
+      <div style={styles.background} className="j-background">
         <div style={styles.gridLines}></div>
         <div style={styles.particles}></div>
       </div>
 
       {/* Contenedor principal */}
-      <div style={styles.mainContainer}>
-        <div style={styles.contentRow}>
+      <div style={styles.mainContainer} className="j-main">
+        <div style={styles.contentRow} className="j-row">
         {/* Izquierda - Interfaz holográfica */}
-        <div style={styles.holographicDisplay}>
+        <div style={styles.holographicDisplay} className="j-holo">
           <div style={styles.header}>
             <div style={{ ...styles.statusIndicator, backgroundColor: getStatusColor() }}></div>
             <h1 style={styles.title}>⬤ J.A.R.V.I.S</h1>
-            <div style={styles.headerInfo}>
+            <div style={styles.headerInfo} className="j-headerinfo">
               <span style={styles.version}>v2.0</span>
               <span style={styles.model}>Claude</span>
             </div>
           </div>
 
           {/* Visualizador de ondas */}
-          <div style={styles.waveContainer}>
+          <div style={styles.waveContainer} className="j-wave">
             <svg style={styles.waveSvg} viewBox="0 0 400 150" preserveAspectRatio="none">
               <defs>
                 <linearGradient id="waveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -343,7 +343,7 @@ const JARVIS = () => {
           </div>
 
           {/* Historial */}
-          <div style={styles.historyContainer}>
+          <div style={styles.historyContainer} className="j-history">
             <div style={styles.label}>HISTORIAL:</div>
             <div style={styles.history}>
               {history.slice(-6).map((msg, i) => (
@@ -366,7 +366,7 @@ const JARVIS = () => {
         </div>
 
         {/* Parte inferior - Controles */}
-        <div style={styles.controlPanel}>
+        <div style={styles.controlPanel} className="j-controls">
           {/* Botón micrófono grande */}
           <button
             onClick={handleMicClick}
@@ -383,7 +383,7 @@ const JARVIS = () => {
           </button>
 
           {/* Estado */}
-          <div style={styles.statusContainer}>
+          <div style={styles.statusContainer} className="j-status">
             <div style={{ ...styles.statusDot, backgroundColor: getStatusColor() }}></div>
             <span style={styles.statusText}>{getStatusText()}</span>
           </div>
@@ -394,12 +394,13 @@ const JARVIS = () => {
               setShowConexiones(true);
             }}
             style={styles.conexionesButton}
+            className="j-btn-conexiones"
             data-testid="abrir-conexiones"
           >
             CONEXIONES
           </button>
 
-          <a href={`${apiBase}/guia/`} style={styles.conexionesButton} data-testid="abrir-guia">
+          <a href={`${apiBase}/guia/`} style={styles.conexionesButton} className="j-btn-guia" data-testid="abrir-guia">
             GUÍA
           </a>
 
@@ -411,6 +412,7 @@ const JARVIS = () => {
               setResponse('');
             }}
             style={styles.clearButton}
+            className="j-clear"
           >
             LIMPIAR
           </button>
@@ -445,6 +447,41 @@ const JARVIS = () => {
         button:disabled {
           opacity: 0.5;
           cursor: not-allowed;
+        }
+
+        /* iPhone y pantallas estrechas: una columna que se desplaza, con los
+           controles siempre a mano abajo, como en una app. */
+        @media (max-width: 760px) {
+          body { overflow: auto; }
+          .j-container {
+            height: auto !important; min-height: 100vh; min-height: 100dvh;
+            display: block !important; overflow: visible !important;
+          }
+          .j-background { position: fixed !important; inset: 0; }
+          .j-main {
+            width: 100% !important; height: auto !important; min-height: 100vh; min-height: 100dvh;
+            border: none !important; border-radius: 0 !important; box-shadow: none !important;
+            overflow: visible !important; gap: 14px !important;
+            padding: calc(env(safe-area-inset-top, 0px) + 14px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)) !important;
+          }
+          .j-row { flex-direction: column !important; flex: none !important; gap: 16px !important; }
+          .j-holo { min-width: 0 !important; flex: none !important; }
+          .j-headerinfo { display: none !important; }
+          .j-wave { height: 80px !important; margin: 4px 0 !important; }
+          .j-history { flex: none !important; }
+          .j-dash { min-width: 0 !important; overflow: visible !important; flex: none !important; }
+          .j-controls {
+            position: sticky; bottom: 0; z-index: 20; gap: 14px !important;
+            margin: 0 calc(-1 * max(16px, env(safe-area-inset-right, 0px))) 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+            padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)) !important;
+            background: rgba(5, 8, 12, 0.94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+          }
+          .j-controls { flex-wrap: nowrap !important; justify-content: space-between !important; }
+          .j-controls > button:first-child { order: 2; width: 60px !important; height: 60px !important; font-size: 28px !important; }
+          .j-btn-conexiones { order: 1; }
+          .j-btn-guia { order: 3; min-width: 104px; text-align: center; }
+          .j-btn-conexiones, .j-btn-guia { padding: 10px 12px !important; font-size: 11px !important; }
+          .j-status, .j-clear { display: none !important; }
         }
         
         @keyframes float {

@@ -361,6 +361,134 @@ const IphoneCard = ({ info }) => (
   </div>
 );
 
+// ── Avisos propios de JARVIS en este dispositivo (Web Push) ──
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+const deviceName = () => {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Mac/.test(ua)) return 'Mac';
+  return 'Navegador';
+};
+
+const keyBytes = (base64) => {
+  const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+};
+
+const PushCard = () => {
+  const [state, setState] = useState('cargando');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [devices, setDevices] = useState([]);
+
+  const refresh = useCallback(async () => {
+    try {
+      setDevices((await apiGet('/api/push/devices')).devices);
+    } catch (e) {
+      setDevices([]);
+    }
+    if (!pushSupported()) {
+      setState(isIOS() && !isStandalone() ? 'instalar' : 'sin-soporte');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setState('bloqueado');
+      return;
+    }
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    setState(subscription ? 'activo' : 'inactivo');
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const run = async (action) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await action();
+    } catch (e) {
+      setMessage({ error: true, text: e.message });
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  const enable = () => run(async () => {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      throw new Error('No has dado permiso para los avisos.');
+    }
+    const { public_key: publicKey } = await apiGet('/api/push/key');
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
+    await apiPost('/api/push/subscribe', { subscription: subscription.toJSON(), device: deviceName() });
+    await apiPost('/api/push/test');
+    setMessage({ error: false, text: 'Activados. Te he mandado un aviso de prueba.' });
+  });
+
+  const disable = () => run(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      await apiPost('/api/push/unsubscribe', { subscription: subscription.toJSON() });
+      await subscription.unsubscribe();
+    }
+    setMessage({ error: false, text: 'Desactivados en este dispositivo.' });
+  });
+
+  const test = () => run(async () => {
+    const result = await apiPost('/api/push/test');
+    setMessage({ error: !result.ok, text: result.ok ? 'Aviso de prueba enviado.' : 'No se ha podido entregar.' });
+  });
+
+  return (
+    <div style={styles.card} data-testid="avisos-dispositivo">
+      <div style={styles.cardHead}>
+        <div style={styles.cardName}>Avisos en este dispositivo</div>
+        {state === 'activo' && <span style={{ ...styles.pill, color: '#00ff88', borderColor: '#00ff88' }}>ACTIVADOS</span>}
+      </div>
+      <div style={styles.what}>Los avisos de JARVIS (recordatorios, gasolina, correo importante, hora de salir) con su propio icono, sin apps aparte.</div>
+      {state === 'instalar' && (
+        <div style={styles.note}>
+          En el iPhone, primero añade este panel a la pantalla de inicio (Compartir → <em>Añadir a pantalla de inicio</em>),
+          ábrelo desde su icono y vuelve aquí.
+        </div>
+      )}
+      {state === 'sin-soporte' && <div style={styles.note}>Este navegador no admite avisos.</div>}
+      {state === 'bloqueado' && (
+        <div style={styles.note}>Los avisos están bloqueados. Actívalos en Ajustes → Notificaciones → JARVIS.</div>
+      )}
+      <div style={styles.actions}>
+        {state === 'inactivo' && (
+          <button type="button" style={styles.primary} disabled={busy} onClick={enable} data-testid="activar-avisos">
+            {busy ? 'Activando…' : 'Activar avisos aquí'}
+          </button>
+        )}
+        {state === 'activo' && (
+          <>
+            <button type="button" style={styles.secondary} disabled={busy} onClick={test}>Probar</button>
+            <button type="button" style={styles.danger} disabled={busy} onClick={disable}>Desactivar aquí</button>
+          </>
+        )}
+      </div>
+      {devices.length > 0 && (
+        <div style={styles.help}>
+          Activados en: {devices.map((d) => d.device).join(', ')}
+        </div>
+      )}
+      {message && <div style={{ ...styles.message, color: message.error ? '#ff8888' : '#00ff88' }}>{message.text}</div>}
+    </div>
+  );
+};
+
 const ConexionesPanel = ({ onClose }) => {
   const [services, setServices] = useState(null);
   const [error, setError] = useState('');
@@ -444,6 +572,7 @@ const ConexionesPanel = ({ onClose }) => {
             <div style={styles.grid}>
               <SetupCodeCard pending={setupPending} onChanged={onChanged} />
               <IphoneCard info={iphone} />
+              <PushCard />
             </div>
           </div>
         )}

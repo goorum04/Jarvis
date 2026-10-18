@@ -201,8 +201,9 @@ SERVICES = [
         ],
     },
     {
-        "id": "avisos", "name": "Avisos al iPhone", "kind": "keys",
-        "what": "Que JARVIS le avise sin que pregunte: recordatorios, gasolina, correo importante.",
+        "id": "avisos", "name": "Avisos por Pushcut o ntfy", "kind": "keys",
+        "what": "Alternativa a «Avisos en este dispositivo» (arriba), que es lo más sencillo. Pushcut, además, "
+                "puede leer los avisos en voz alta.",
         "link": "https://www.pushcut.io",
         "setup": [],
         "fields": [
@@ -268,7 +269,8 @@ def _connected(service_id: str) -> bool:
     if service_id == "shopify":
         return bool(_env("SHOPIFY_SHOP") and _env("SHOPIFY_ACCESS_TOKEN"))
     if service_id == "avisos":
-        return bool(_env("PUSHCUT_SECRET") or _env("NTFY_TOPIC"))
+        import webpush
+        return bool(_env("PUSHCUT_SECRET") or _env("NTFY_TOPIC")) or webpush.is_configured()
     if service_id == "llamadas":
         return bool(_env("ELEVENLABS_AGENT_ID") and _env("ELEVENLABS_PHONE_NUMBER_ID"))
     return all(_env(f["env"]) for f in _BY_ID[service_id]["fields"] if not f["optional"])

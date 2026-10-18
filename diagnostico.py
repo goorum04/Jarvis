@@ -202,7 +202,8 @@ def check_weather():
 
 def check_notifications(send_test: bool):
     if not notifier.is_configured():
-        return _result("Avisos al iPhone", AVISO, "Sin Pushcut ni ntfy: los avisos solo salen en la pantalla.", "Guía, paso 7.")
+        return _result("Avisos al iPhone", AVISO, "Ningún dispositivo recibe los avisos: solo salen en la pantalla.",
+                       "Desde el icono de JARVIS en el iPhone: Conexiones → Avisos en este dispositivo → Activar.")
     if not send_test:
         return _result("Avisos al iPhone", OK, "Configurados (usa --probar-avisos para mandar uno de prueba).")
     delivered = notifier.notify("JARVIS", "Aviso de prueba: si lees esto, los avisos funcionan.")

@@ -22,3 +22,5 @@ python-docx>=1.1.0
 
 # Código QR del panel para abrirlo en el iPhone
 qrcode>=8.0
+# Avisos propios del panel instalado en la pantalla de inicio (Web Push)
+pywebpush>=2.0.0

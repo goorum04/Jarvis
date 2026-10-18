@@ -4,9 +4,10 @@ JARVIS 2.0 - Backend con agente, memoria persistente y recordatorios proactivos
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 import asyncio
+import hmac
 import html
 import json
 import os
@@ -40,6 +41,7 @@ import notifier  # noqa: E402
 import phone_calls  # noqa: E402
 import store  # noqa: E402
 import weather  # noqa: E402
+import webpush  # noqa: E402
 import whoop  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -1795,7 +1797,7 @@ async def startup():
     scheduler.start()
     logger.info("Vigilancia iniciada: recordatorios, hora de salir, correo importante y gasolina")
     if not notifier.is_configured():
-        logger.warning("Sin Pushcut ni ntfy: los avisos solo llegarán a la pantalla, no al iPhone.")
+        logger.warning("Ningún dispositivo recibe avisos (ni Pushcut ni ntfy): solo llegarán a la pantalla.")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -2157,6 +2159,92 @@ async def dashboard():
         "actions": actions,
         "budget": budget_status(),
     }
+
+
+# ── COCHE: AVISO DE COCHE ABIERTO ─────────────────────────────────────────────
+# El iPhone avisa al desconectar CarPlay y JARVIS comprueba él mismo, al minuto,
+# si el coche ha quedado cerrado (así el iPhone no tiene que esperar).
+CAR_LEFT_DELAY_SECONDS = 60
+_background_tasks: set = set()
+
+
+async def _check_car_left():
+    await asyncio.sleep(CAR_LEFT_DELAY_SECONDS)
+    locked = await asyncio.to_thread(_get_lock_status)
+    # None = no se pudo consultar: nunca se da una alarma falsa.
+    if locked is False:
+        await alert("Coche abierto", "Te has dejado el coche abierto. Ciérralo desde la app Mercedes me.", urgent=True)
+
+
+@app.post("/api/car/left", dependencies=[Depends(require_token)])
+async def car_left():
+    if not MERCEDES_CONFIGURED:
+        return {"ok": False, "detail": "El coche no está conectado."}
+    task = asyncio.create_task(_check_car_left())
+    _background_tasks.add(task)  # que no lo recoja el recolector antes de tiempo
+    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(lambda t: t.exception() and logger.error(f"Comprobación de coche abierto fallida: {t.exception()!r}"))
+    return {"ok": True, "detail": f"Compruebo el cierre en {CAR_LEFT_DELAY_SECONDS} segundos."}
+
+
+# ── PANEL COMO APP (pantalla de inicio) Y SUS AVISOS ─────────────────────────
+# El panel se puede añadir a la pantalla de inicio del iPhone o la tablet como
+# una app: con su icono, a pantalla completa y con avisos propios (sin Pushcut).
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def web_manifest(token: str = ""):
+    expected = os.getenv("JARVIS_API_TOKEN", "")
+    # Al abrirla desde la pantalla de inicio entra ya con su acceso (allí el
+    # navegador no comparte lo que recordaba Safari).
+    valid = bool(expected) and hmac.compare_digest(token, expected)
+    start_url = f"/?{urlencode({'token': token})}" if valid else "/"
+    manifest = {
+        "name": "JARVIS", "short_name": "JARVIS", "description": f"El asistente personal de {OWNER_NAME}",
+        "lang": "es", "start_url": start_url, "scope": "/", "display": "standalone", "orientation": "any",
+        "background_color": "#05080c", "theme_color": "#05080c",
+        "icons": [
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    return JSONResponse(manifest, media_type="application/manifest+json", headers={"Cache-Control": "no-store"})
+
+
+class PushSuscripcion(BaseModel):
+    subscription: dict
+    device: str = ""
+
+
+@app.get("/api/push/key", dependencies=[Depends(require_token)])
+async def push_key():
+    return {"public_key": await asyncio.to_thread(webpush.public_key)}
+
+
+@app.post("/api/push/subscribe", dependencies=[Depends(require_token)])
+async def push_subscribe(body: PushSuscripcion):
+    try:
+        count = webpush.subscribe(body.subscription, body.device)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "devices": count}
+
+
+@app.post("/api/push/unsubscribe", dependencies=[Depends(require_token)])
+async def push_unsubscribe(body: PushSuscripcion):
+    webpush.unsubscribe(body.subscription.get("endpoint", ""))
+    return {"ok": True}
+
+
+@app.get("/api/push/devices", dependencies=[Depends(require_token)])
+async def push_devices():
+    return {"devices": [{"device": d["device"], "since": d["since"]} for d in webpush.devices()]}
+
+
+@app.post("/api/push/test", dependencies=[Depends(require_token)])
+async def push_test():
+    delivered = await asyncio.to_thread(webpush.send, "JARVIS", "Aviso de prueba: así te llegarán mis avisos.")
+    return {"ok": delivered}
 
 
 # ── CONEXIONES (las hace Nacho desde el panel) ────────────────────────────────
