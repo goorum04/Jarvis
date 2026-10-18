@@ -389,7 +389,7 @@ struct BootView: View {
                 VStack(spacing: 7) {
                     ForEach(Array(lines.prefix(shown).enumerated()), id: \.offset) { _, line in
                         HStack(spacing: 8) {
-                            Text(line.name).foregroundStyle(Theme.muted)
+                            Text(line.name).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
                             Rectangle().fill(Theme.accent.opacity(0.25)).frame(height: 1)
                             Text(line.value).foregroundStyle(line.warn ? Theme.warning : Theme.ok)
                         }

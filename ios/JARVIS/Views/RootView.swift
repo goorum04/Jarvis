@@ -88,7 +88,7 @@ struct MainView: View {
                     .shadow(color: Theme.accent.opacity(0.8), radius: 8)
                 Spacer()
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    Text(timeline.date, format: .dateTime.hour().minute())
+                    Text(timeline.date.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).hour(.twoDigits(amPM: .omitted)).minute()))
                         .font(Theme.display(15, weight: .medium))
                         .foregroundStyle(Theme.ice)
                         .monospacedDigit()
