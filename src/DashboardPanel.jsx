@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { apiGet } from './config';
 
 const REFRESH_MS = 60 * 1000;
@@ -26,21 +26,81 @@ const hoursText = (minutes) => {
   return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
 };
 
-const TIRE_ORDER = [['front_left', 'DI'], ['front_right', 'DD'], ['rear_left', 'TI'], ['rear_right', 'TD']];
+// [clave, abreviatura, cómo la nombra JARVIS en sus avisos]
+const TIRE_ORDER = [
+  ['front_left', 'DI', 'delantera izquierda'], ['front_right', 'DD', 'delantera derecha'],
+  ['rear_left', 'TI', 'trasera izquierda'], ['rear_right', 'TD', 'trasera derecha'],
+];
 
 // Una línea legible para cada acción del registro.
 const describeAction = (d) =>
   d.title || d.subject || (d.contact && d.text ? `${d.contact} · ${d.text}` : d.contact) || d.to || d.name || '';
 
-const Card = ({ title, children, accent = '#00d4ff', testId, grow = false }) => (
-  <div style={{ ...styles.card, ...(grow ? { flex: 1 } : {}), borderColor: `${accent}55` }} data-testid={testId}>
-    <div style={{ ...styles.cardTitle, color: accent }}>{title}</div>
+const hexToRgb = (hex) => {
+  const v = hex.replace('#', '');
+  return `${parseInt(v.slice(0, 2), 16)},${parseInt(v.slice(2, 4), 16)},${parseInt(v.slice(4, 6), 16)}`;
+};
+
+// Los números suben hasta su valor al aparecer (no en las pruebas automáticas).
+const useCountUp = (value, duration = 1100) => {
+  const [shown, setShown] = useState(navigator.webdriver ? value : 0);
+  const fromRef = useRef(0);
+  useEffect(() => {
+    if (value == null || navigator.webdriver) {
+      setShown(value);
+      return undefined;
+    }
+    const from = fromRef.current;
+    const start = performance.now();
+    let frame;
+    const step = (now) => {
+      const p = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(from + (value - from) * eased);
+      if (p < 1) frame = requestAnimationFrame(step);
+      else fromRef.current = value;
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [value, duration]);
+  return shown;
+};
+
+const Card = ({ title, children, accent = '#25c8f2', testId, className = '' }) => (
+  <div
+    className={`holo-card ${className}`}
+    style={{ '--accent': accent, '--accent-rgb': hexToRgb(accent) }}
+    data-testid={testId}
+  >
+    <div className="holo-label">{title}</div>
     {children}
   </div>
 );
 
-// Panel permanente para la tablet: lo que JARVIS sabe del día, en vivo.
-// Cada tarjeta solo aparece si ese servicio está configurado en el backend.
+// Indicador en arco de 270°, como los de un salpicadero.
+const ArcGauge = ({ value, color, label, children }) => {
+  const r = 46;
+  const length = 2 * Math.PI * r * 0.75;
+  const pct = Math.max(0, Math.min(100, value || 0));
+  return (
+    <div className="arc-gauge" style={{ color }}>
+      <svg viewBox="0 0 112 112" aria-hidden="true">
+        <circle className="ticks" cx="56" cy="56" r="53" strokeDasharray={`1 ${(2 * Math.PI * 53 * 0.75) / 40 - 1} `} />
+        <circle className="track" cx="56" cy="56" r={r} strokeDasharray={`${length} 999`} />
+        <circle className="fill" cx="56" cy="56" r={r} stroke={color} strokeDasharray={`${(length * pct) / 100} 999`} />
+      </svg>
+      <div className="arc-gauge-center">
+        <div>
+          {children}
+          {label && <small>{label}</small>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Panel con el día de Nacho, en vivo. Cada tarjeta solo aparece si ese
+// servicio está configurado en el backend.
 const DashboardPanel = ({ refreshKey }) => {
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
@@ -68,95 +128,113 @@ const DashboardPanel = ({ refreshKey }) => {
     };
   }, [refreshKey]);
 
+  const fuel = useCountUp(data && data.car ? data.car.fuel_percent : null);
+  const recoveryValue = useCountUp(data && data.health && data.health.recovery ? data.health.recovery.recovery_percent : null);
+  const temp = useCountUp(data && data.weather ? data.weather.temperature_c : null, 900);
+
   if (!data) {
     return (
-      <div style={styles.panel} className="j-dash">
-        <div style={styles.muted}>{error ? 'No se puede conectar con JARVIS.' : 'Cargando…'}</div>
+      <div className="hud-dash j-dash">
+        <div className="holo-card span-6">
+          <div className="holo-label">Enlace</div>
+          <div className="holo-muted">{error ? 'No se puede conectar con JARVIS.' : 'Estableciendo enlace…'}</div>
+        </div>
       </div>
     );
   }
 
-  const { weather, car, health, calendar, email, store, tasks, actions, budget, timezone } = data;
+  const { weather, car, health, calendar, email, store, tasks, actions, budget, timezone, city } = data;
   const recovery = health && health.recovery;
   const sleep = health && health.sleep;
   const strain = health && health.strain;
   const tireProblems = (car && car.tire_problems) || [];
+  const carAlert = car && (car.locked === false || tireProblems.length > 0);
+  const zoneColor = recovery ? ZONE_COLORS[recovery.zone] : '#25c8f2';
+  const fuelColor = car && car.fuel_percent != null && car.fuel_percent <= 20 ? '#ff4d5e' : '#25c8f2';
 
   return (
-    <div style={styles.panel} className="j-dash" data-testid="dashboard">
-      <div style={styles.cardRow}>
-        {weather && (
-          <Card title="EXTERIOR" testId="card-weather" grow>
-            <div style={styles.big}>{Math.round(weather.temperature_c)}°</div>
-          </Card>
-        )}
-        {car && (
-          <Card
-            title="MERCEDES"
-            accent={car.locked === false || tireProblems.length ? '#ff3333' : '#00ff00'}
-            testId="card-car"
-            grow
-          >
+    <div className="hud-dash j-dash" data-testid="dashboard">
+      {car && (
+        <Card title="Mercedes-AMG C 63" accent={carAlert ? '#ff4d5e' : '#25c8f2'} testId="card-car" className="span-4">
+          <div className="car-stage holo-shimmer">
+            <img className="holo-img holo-float" src="/holo/coche.webp" alt="" />
+          </div>
+          <div className="car-stats">
             {car.fuel_percent != null && (
-              <>
-                <div style={styles.big}>{Math.round(car.fuel_percent)}%</div>
-                <div style={styles.gauge}>
-                  <div style={{ ...styles.gaugeFill, width: `${Math.min(100, car.fuel_percent)}%` }} />
-                </div>
-                <div style={styles.muted}>{Math.round(car.range_km)} km de autonomía</div>
-              </>
+              <ArcGauge value={fuel} color={fuelColor} label="DEPÓSITO">
+                <div className="holo-big">{Math.round(fuel)}%</div>
+              </ArcGauge>
             )}
+            <div>
+              {car.range_km != null && (
+                <div className="holo-big" style={{ fontSize: 30 }}>
+                  {Math.round(car.range_km)}<span className="holo-unit">KM</span>
+                </div>
+              )}
+              {car.range_km != null && <div className="holo-muted">de autonomía</div>}
+            </div>
             {car.locked != null && (
-              <div style={{ color: car.locked ? '#00ff00' : '#ff3333', marginTop: 6 }}>
-                {car.locked ? 'Cerrado' : 'ABIERTO'}
-              </div>
-            )}
-            {car.tire_pressure_bar && (
-              <div style={styles.tires} data-testid="tires">
-                {TIRE_ORDER.map(([key, label]) => (
-                  <span key={key}>
-                    {label} {car.tire_pressure_bar[key] != null ? car.tire_pressure_bar[key].toFixed(1).replace('.', ',') : '—'}
-                  </span>
-                ))}
-              </div>
-            )}
-            {tireProblems.map((p) => (
-              <div key={p} style={{ color: '#ff3333', fontSize: 12 }}>⚠ {p}</div>
-            ))}
-          </Card>
-        )}
-      </div>
-
-      {health && (
-        <Card
-          title="SALUD · WHOOP"
-          accent={recovery ? ZONE_COLORS[recovery.zone] : '#00d4ff'}
-          testId="card-health"
-        >
-          <div style={styles.healthRow}>
-            {recovery && (
-              <div>
-                <div style={{ ...styles.big, color: ZONE_COLORS[recovery.zone] }}>{Math.round(recovery.recovery_percent)}%</div>
-                <div style={styles.muted}>recuperación</div>
-              </div>
-            )}
-            {sleep && sleep.minutes_asleep != null && (
-              <div>
-                <div style={styles.big}>{hoursText(sleep.minutes_asleep)}</div>
-                <div style={styles.muted}>
-                  dormidas{sleep.minutes_needed ? ` de ${hoursText(sleep.minutes_needed)}` : ''}
-                </div>
-              </div>
-            )}
-            {strain && strain.strain != null && (
-              <div>
-                <div style={styles.big}>{strain.strain.toFixed(1).replace('.', ',')}</div>
-                <div style={styles.muted}>esfuerzo hoy</div>
-              </div>
+              <span className="lock-pill" style={{ color: car.locked ? '#3ddc84' : '#ff4d5e' }}>
+                {car.locked ? 'CERRADO' : 'ABIERTO'}
+              </span>
             )}
           </div>
+          {car.tire_pressure_bar && (
+            <div className="tires" data-testid="tires">
+              {TIRE_ORDER.map(([key, label, name]) => {
+                const v = car.tire_pressure_bar[key];
+                const warn = tireProblems.some((p) => p.includes(name));
+                return (
+                  <span key={key} className={warn ? 'warn' : ''}>
+                    {label} {v != null ? v.toFixed(1).replace('.', ',') : '—'}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {tireProblems.map((p) => (
+            <div key={p} className="car-warning">⚠ {p}</div>
+          ))}
+        </Card>
+      )}
+
+      {weather && (
+        <Card title={city ? `Exterior · ${city}` : 'Exterior'} testId="card-weather" className={`weather-card ${car ? 'span-2' : 'span-3'}`}>
+          <img className="holo-img weather-terrain" src="/holo/pirineos.webp" alt="" />
+          <div className="weather-content">
+            <div className="holo-big" style={{ fontSize: 54 }}>{Math.round(temp)}°</div>
+          </div>
+        </Card>
+      )}
+
+      {health && (
+        <Card title="Biometría · WHOOP" accent={zoneColor} testId="card-health" className="span-3">
+          <div className="health-wrap">
+            <img className="holo-img health-body holo-float" src="/holo/cuerpo.webp" alt="" />
+            <div className="health-stats">
+              {recovery && (
+                <ArcGauge value={recoveryValue} color={zoneColor} label="RECUPERACIÓN">
+                  <div className="holo-big" style={{ color: zoneColor }}>{Math.round(recoveryValue)}%</div>
+                </ArcGauge>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {sleep && sleep.minutes_asleep != null && (
+                  <div className="health-mini">
+                    <b>{hoursText(sleep.minutes_asleep)}</b>
+                    <span>dormidas{sleep.minutes_needed ? ` de ${hoursText(sleep.minutes_needed)}` : ''}</span>
+                  </div>
+                )}
+                {strain && strain.strain != null && (
+                  <div className="health-mini">
+                    <b>{strain.strain.toFixed(1).replace('.', ',')}</b>
+                    <span>esfuerzo hoy</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
           {recovery && (
-            <div style={styles.tires}>
+            <div className="tires">
               {recovery.hrv_ms != null && <span>VFC {recovery.hrv_ms} ms</span>}
               {recovery.resting_heart_rate != null && <span>Reposo {recovery.resting_heart_rate} ppm</span>}
               {sleep && sleep.performance_percent != null && <span>Sueño {Math.round(sleep.performance_percent)}%</span>}
@@ -167,171 +245,92 @@ const DashboardPanel = ({ refreshKey }) => {
       )}
 
       {calendar && (
-        <Card title="AGENDA DE HOY" testId="card-calendar">
-          {calendar.length === 0 && <div style={styles.muted}>Sin citas.</div>}
-          {calendar.map((event) => (
-            <div key={event.id} style={styles.row}>
-              <span style={styles.rowTime}>{time(event.start, timezone)}</span>
-              <span>{event.title}</span>
-            </div>
-          ))}
+        <Card title="Agenda de hoy" testId="card-calendar" className="span-3">
+          {calendar.length === 0 && <div className="holo-muted">Sin citas.</div>}
+          <div className="hud-list">
+            {calendar.map((event) => (
+              <div key={event.id} className="hud-list-row">
+                <span className="hud-list-key">{time(event.start, timezone)}</span>
+                <span className="hud-list-val">{event.title}</span>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
       {email && (
-        <Card title={`CORREO · ${email.unread_total} SIN LEER`} testId="card-email">
-          {email.emails.map((mail) => (
-            <div key={mail.id} style={styles.row}>
-              <span style={styles.rowTime}>{mail.from}</span>
-              <span style={styles.ellipsis}>{mail.subject}</span>
-            </div>
-          ))}
+        <Card title={`Correo · ${email.unread_total} sin leer`} testId="card-email" className="span-3">
+          <div className="hud-list">
+            {email.emails.map((mail) => (
+              <div key={mail.id} className="hud-list-row">
+                <span className="hud-list-key">{mail.from}</span>
+                <span className="hud-list-val">{mail.subject}</span>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
       {store && (
-        <Card title="TIENDA" accent="#ff6600" testId="card-store">
-          {store.today && (
-            <div style={styles.row}>
-              <span style={styles.rowTime}>Hoy</span>
-              <span>
-                {store.today.orders} pedidos · {money(store.today.revenue, store.today.currency)}
-              </span>
-            </div>
-          )}
-          {store.pending && (
-            <div style={styles.row}>
-              <span style={styles.rowTime}>Por enviar</span>
-              <span>{store.pending.count}</span>
-            </div>
-          )}
+        <Card title="Tienda" accent="#ffb547" testId="card-store" className="span-3">
+          <div className="hud-list">
+            {store.today && (
+              <div className="hud-list-row">
+                <span className="hud-list-key">Hoy</span>
+                <span className="hud-list-val">
+                  {store.today.orders} pedidos · {money(store.today.revenue, store.today.currency)}
+                </span>
+              </div>
+            )}
+            {store.pending && (
+              <div className="hud-list-row">
+                <span className="hud-list-key">Por enviar</span>
+                <span className="hud-list-val">{store.pending.count}</span>
+              </div>
+            )}
+          </div>
         </Card>
       )}
 
       {tasks && (tasks.tasks.length > 0 || tasks.reminders.length > 0) && (
-        <Card title="PENDIENTE" accent="#00ff00" testId="card-tasks">
-          {tasks.reminders.map((r) => (
-            <div key={`r${r.id}`} style={styles.row}>
-              <span style={styles.rowTime}>{time(r.remind_at, timezone)}</span>
-              <span>{r.text}</span>
-            </div>
-          ))}
-          {tasks.tasks.map((t) => (
-            <div key={`t${t.id}`} style={styles.row}>
-              <span style={styles.rowTime}>{t.due_date || '—'}</span>
-              <span>{t.text}</span>
-            </div>
-          ))}
+        <Card title="Pendiente" accent="#3ddc84" testId="card-tasks" className="span-3">
+          <div className="hud-list">
+            {tasks.reminders.map((r) => (
+              <div key={`r${r.id}`} className="hud-list-row">
+                <span className="hud-list-key">{time(r.remind_at, timezone)}</span>
+                <span className="hud-list-val">{r.text}</span>
+              </div>
+            ))}
+            {tasks.tasks.map((t) => (
+              <div key={`t${t.id}`} className="hud-list-row">
+                <span className="hud-list-key">{t.due_date || '—'}</span>
+                <span className="hud-list-val">{t.text}</span>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
       {actions && actions.length > 0 && (
-        <Card title="HECHO EN TU NOMBRE" accent="#ff00ff" testId="card-actions">
-          {actions.slice(0, 6).map((a, i) => (
-            <div key={i} style={styles.row}>
-              <span style={styles.rowTime}>{a.created_at.substring(11, 16)}</span>
-              <span style={styles.ellipsis}>{a.kind}: {describeAction(a.details)}</span>
-            </div>
-          ))}
+        <Card title="Hecho en tu nombre" accent="#ff4fd8" testId="card-actions" className="span-6">
+          <div className="hud-list">
+            {actions.slice(0, 6).map((a, i) => (
+              <div key={i} className="hud-list-row">
+                <span className="hud-list-key">{a.created_at.substring(11, 16)}</span>
+                <span className="hud-list-val">{a.kind}: {describeAction(a.details)}</span>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
-      <div style={styles.updated}>
+      <div className="hud-foot">
         {budget && `Gasto de hoy ${budget.usd.toFixed(2).replace('.', ',')} $ de ${budget.limit_usd} $ · `}
         Actualizado {time(data.updated_at, timezone)}
         {error && ' · sin conexión'}
       </div>
     </div>
   );
-};
-
-const styles = {
-  panel: {
-    flex: 1,
-    minWidth: '300px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-    overflowY: 'auto',
-  },
-  cardRow: {
-    display: 'flex',
-    gap: '12px',
-    flexWrap: 'wrap',
-  },
-  card: {
-    minWidth: '140px',
-    padding: '12px 15px',
-    background: 'rgba(0,212,255,0.04)',
-    border: '1px solid',
-    borderRadius: '8px',
-    color: '#cfefff',
-    fontSize: '14px',
-  },
-  cardTitle: {
-    fontSize: '11px',
-    letterSpacing: '2px',
-    fontWeight: 'bold',
-    marginBottom: '8px',
-  },
-  big: {
-    fontSize: '34px',
-    fontWeight: 'bold',
-    color: '#00d4ff',
-    lineHeight: 1.1,
-  },
-  gauge: {
-    height: '6px',
-    background: 'rgba(0,212,255,0.15)',
-    borderRadius: '3px',
-    margin: '6px 0',
-    overflow: 'hidden',
-  },
-  gaugeFill: {
-    height: '100%',
-    background: '#00d4ff',
-  },
-  row: {
-    display: 'flex',
-    gap: '10px',
-    padding: '4px 0',
-    borderBottom: '1px solid rgba(0,212,255,0.08)',
-  },
-  rowTime: {
-    color: '#00ff00',
-    minWidth: '86px',
-    maxWidth: '140px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  ellipsis: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  healthRow: {
-    display: 'flex',
-    gap: '22px',
-    flexWrap: 'wrap',
-  },
-  tires: {
-    display: 'flex',
-    gap: '10px',
-    flexWrap: 'wrap',
-    fontSize: '12px',
-    marginTop: '6px',
-    opacity: 0.85,
-  },
-  muted: {
-    opacity: 0.6,
-    fontSize: '13px',
-  },
-  updated: {
-    fontSize: '11px',
-    opacity: 0.5,
-    textAlign: 'right',
-  },
 };
 
 export default DashboardPanel;

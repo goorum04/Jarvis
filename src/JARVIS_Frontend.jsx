@@ -1,7 +1,78 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import BootSequence from './BootSequence';
 import ConexionesPanel from './ConexionesPanel';
 import DashboardPanel from './DashboardPanel';
+import HoloCore from './HoloCore';
 import { apiBase, wsUrl } from './config';
+import './hud.css';
+
+const STATUS_COLORS = {
+  listening: '#ffb547',
+  processing: '#25c8f2',
+  speaking: '#bff3ff',
+  error: '#ff4d5e',
+  disconnected: '#7fa3b5',
+  reminder: '#ff4fd8',
+  ready: '#3ddc84',
+};
+
+const STATUS_TEXT = {
+  listening: 'Escuchando',
+  processing: 'Procesando',
+  speaking: 'Hablando',
+  error: 'Error',
+  disconnected: 'Desconectado',
+  reminder: 'Recordatorio',
+  ready: 'Listo',
+};
+
+// El arranque se ve una vez por sesión. En las pruebas automáticas no sale
+// (salvo con ?boot=1, para verlo).
+const shouldBoot = () => {
+  const forced = new URLSearchParams(window.location.search).get('boot') === '1';
+  if (forced) return true;
+  if (navigator.webdriver) return false;
+  try {
+    return !sessionStorage.getItem('jarvis_booted');
+  } catch (e) {
+    return true;
+  }
+};
+
+const MicIcon = ({ listening, speaking }) => {
+  if (listening) {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+    );
+  }
+  if (speaking) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+        <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7" />
+    </svg>
+  );
+};
+
+const Clock = () => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <>
+      <span className="hud-date">{now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase()}</span>
+      <span className="hud-clock">{now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+    </>
+  );
+};
 
 const JARVIS = () => {
   // Estados
@@ -13,14 +84,13 @@ const JARVIS = () => {
   const [history, setHistory] = useState([]);
   // Cambia cuando JARVIS termina de hablar: el panel se refresca por si algo cambió.
   const [refreshKey, setRefreshKey] = useState(0);
-  const [waveIntensity, setWaveIntensity] = useState(0);
   // Sección «Conexiones»: se abre con el botón o al volver de conectar una cuenta.
   const [showConexiones, setShowConexiones] = useState(window.location.hash === '#conexiones');
+  const [booting, setBooting] = useState(() => shouldBoot() && window.location.hash !== '#conexiones');
 
   // Referencias
   const wsRef = useRef(null);
   const recognitionRef = useRef(null);
-  const animationRef = useRef(null);
   // Ref para evitar closure obsoleto en onend de SpeechRecognition
   const transcriptRef = useRef('');
   // Frases de audio pendientes de reproducir, en orden de llegada
@@ -28,6 +98,11 @@ const JARVIS = () => {
   const playingRef = useRef(false);
   const responseDoneRef = useRef(true);
   const responseTextRef = useRef('');
+  // Análisis de la voz de JARVIS para que el núcleo «hable» con ella
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const levelBufRef = useRef(null);
+  const routedRef = useRef(false);
 
   // Inicializar WebSocket
   useEffect(() => {
@@ -38,12 +113,67 @@ const JARVIS = () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
-      if (animationRef.current) {
-        clearInterval(animationRef.current);
-      }
     };
     // Solo al montar: conectar una vez el WebSocket y el reconocimiento de voz.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // El contexto de audio solo puede arrancar tras un toque del usuario.
+  const ensureAudio = () => {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!audioCtxRef.current) {
+      try {
+        audioCtxRef.current = new Ctx();
+        analyserRef.current = audioCtxRef.current.createAnalyser();
+        analyserRef.current.fftSize = 512;
+        analyserRef.current.connect(audioCtxRef.current.destination);
+        levelBufRef.current = new Uint8Array(analyserRef.current.fftSize);
+      } catch (e) {
+        audioCtxRef.current = null;
+        return null;
+      }
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+    return audioCtxRef.current;
+  };
+
+  // Pequeños sonidos de interfaz, sintetizados (sin archivos).
+  const chirp = (up) => {
+    const ctx = ensureAudio();
+    if (!ctx || ctx.state !== 'running') return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t = ctx.currentTime;
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(up ? 520 : 1040, t);
+    osc.frequency.exponentialRampToValueAtTime(up ? 1040 : 520, t + 0.14);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.06, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.2);
+  };
+
+  const getLevel = useCallback(() => {
+    const analyser = analyserRef.current;
+    if (!playingRef.current) return 0;
+    if (!analyser || !routedRef.current) {
+      // Sin análisis (p. ej. sin permiso de audio todavía): un pulso parecido a una voz.
+      const t = Date.now() / 1000;
+      return 0.35 + 0.25 * Math.abs(Math.sin(t * 7.3) * Math.sin(t * 3.1));
+    }
+    const buf = levelBufRef.current;
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i += 1) {
+      const v = (buf[i] - 128) / 128;
+      sum += v * v;
+    }
+    return Math.min(1, Math.sqrt(sum / buf.length) * 3.4);
   }, []);
 
   const initializeWebSocket = () => {
@@ -123,7 +253,6 @@ const JARVIS = () => {
     recognitionRef.current.onstart = () => {
       setIsListening(true);
       setStatus('listening');
-      animateWaves();
     };
 
     recognitionRef.current.onresult = (event) => {
@@ -150,11 +279,7 @@ const JARVIS = () => {
 
     recognitionRef.current.onend = () => {
       setIsListening(false);
-      if (animationRef.current) {
-        clearInterval(animationRef.current);
-        animationRef.current = null;
-      }
-      setWaveIntensity(0);
+      chirp(false);
       if (transcriptRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         sendMessage(transcriptRef.current);
       }
@@ -188,11 +313,6 @@ const JARVIS = () => {
     if (!base64Audio) {
       playingRef.current = false;
       setIsSpeaking(false);
-      setWaveIntensity(0);
-      if (animationRef.current) {
-        clearInterval(animationRef.current);
-        animationRef.current = null;
-      }
       if (responseDoneRef.current) {
         setStatus('ready');
       }
@@ -208,9 +328,20 @@ const JARVIS = () => {
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mp3' }));
 
     const audio = new Audio(url);
+    // Solo se pasa por el analizador si el audio ya está desbloqueado: si no,
+    // se oiría en silencio.
+    routedRef.current = false;
+    const ctx = audioCtxRef.current;
+    if (ctx && ctx.state === 'running' && analyserRef.current) {
+      try {
+        ctx.createMediaElementSource(audio).connect(analyserRef.current);
+        routedRef.current = true;
+      } catch (e) {
+        routedRef.current = false;
+      }
+    }
     audio.onplay = () => {
       setIsSpeaking(true);
-      animateWaves();
     };
     const next = () => {
       URL.revokeObjectURL(url);
@@ -219,15 +350,6 @@ const JARVIS = () => {
     audio.onended = next;
     audio.onerror = next;
     audio.play().catch(next);
-  };
-
-  const animateWaves = () => {
-    if (animationRef.current) {
-      clearInterval(animationRef.current);
-    }
-    animationRef.current = setInterval(() => {
-      setWaveIntensity(Math.sin(Date.now() / 200) * 50 + 50);
-    }, 50);
   };
 
   const startListening = () => {
@@ -244,148 +366,85 @@ const JARVIS = () => {
   };
 
   const handleMicClick = () => {
+    ensureAudio();
     if (isListening) {
       stopListening();
     } else {
+      chirp(true);
       startListening();
     }
   };
 
-  const getStatusColor = () => {
-    switch (status) {
-      case 'listening': return '#00d4ff';
-      case 'processing': return '#ff6600';
-      case 'error': return '#ff3333';
-      case 'reminder': return '#ff00ff';
-      default: return '#00ff00';
-    }
-  };
-
-  const getStatusText = () => {
-    switch (status) {
-      case 'listening': return 'Escuchando...';
-      case 'processing': return 'Procesando...';
-      case 'error': return 'Error';
-      case 'disconnected': return 'Desconectado';
-      case 'reminder': return 'Recordatorio';
-      default: return 'Listo';
-    }
-  };
+  const coreStatus = isSpeaking ? 'speaking' : (STATUS_TEXT[status] ? status : 'ready');
+  const statusColor = STATUS_COLORS[coreStatus];
+  const statusText = STATUS_TEXT[status] || 'Listo';
 
   return (
-    <div style={styles.container} className="j-container">
-      {/* Fondo animado */}
-      <div style={styles.background} className="j-background">
-        <div style={styles.gridLines}></div>
-        <div style={styles.particles}></div>
+    <div className="hud j-container">
+      <div className="hud-bg j-background" aria-hidden="true">
+        <div className="hud-bg-image" style={{ backgroundImage: 'url(/holo/fondo.webp)' }} />
+        <div className="hud-grid" />
+        <div className="hud-scan" />
+        <div className="hud-vignette" />
       </div>
 
-      {/* Contenedor principal */}
-      <div style={styles.mainContainer} className="j-main">
-        <div style={styles.contentRow} className="j-row">
-        {/* Izquierda - Interfaz holográfica */}
-        <div style={styles.holographicDisplay} className="j-holo">
-          <div style={styles.header}>
-            <div style={{ ...styles.statusIndicator, backgroundColor: getStatusColor() }}></div>
-            <h1 style={styles.title}>⬤ J.A.R.V.I.S</h1>
-            <div style={styles.headerInfo} className="j-headerinfo">
-              <span style={styles.version}>v2.0</span>
-              <span style={styles.model}>Claude</span>
+      <div className="hud-main j-main">
+        <header className="hud-header">
+          <div className="hud-brand">
+            <span className="hud-dot" style={{ color: statusColor, background: statusColor }} />
+            <h1 className="hud-title" data-text="J.A.R.V.I.S">J.A.R.V.I.S</h1>
+          </div>
+          <div className="hud-meta j-headerinfo">
+            <Clock />
+          </div>
+        </header>
+
+        <div className="hud-row j-row">
+          {/* Izquierda: el núcleo y la conversación */}
+          <section className="hud-left j-holo">
+            <div className="hud-core-wrap">
+              <HoloCore status={coreStatus} getLevel={getLevel} size={420} />
             </div>
-          </div>
 
-          {/* Visualizador de ondas */}
-          <div style={styles.waveContainer} className="j-wave">
-            <svg style={styles.waveSvg} viewBox="0 0 400 150" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="waveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#00d4ff" stopOpacity="0.8" />
-                  <stop offset="100%" stopColor="#0088ff" stopOpacity="0.2" />
-                </linearGradient>
-              </defs>
-              
-              {/* Ondas animadas */}
-              {[0, 1, 2].map((i) => (
-                <path
-                  key={i}
-                  d={generateWavePath(i, waveIntensity)}
-                  fill="none"
-                  stroke="url(#waveGradient)"
-                  strokeWidth="2"
-                  opacity={1 - i * 0.25}
-                />
-              ))}
-            </svg>
-
-            {/* Círculo central pulsante */}
-            <div
-              style={{
-                ...styles.centerPulse,
-                boxShadow: `0 0 ${20 + waveIntensity}px ${5 + waveIntensity}px rgba(0, 212, 255, ${0.3 + waveIntensity / 300})`
-              }}
-            ></div>
-          </div>
-
-          {/* Transcripción */}
-          <div style={styles.transcriptContainer}>
-            <div style={styles.label}>INPUT:</div>
-            <div style={styles.transcript}>
-              {transcript || '...esperando entrada...'}
+            <div className="holo-card hud-comms">
+              <div className="holo-label" style={{ '--accent': '#ffb547', '--accent-rgb': '255,181,71' }}>Entrada</div>
+              <div className="hud-transcript">{transcript || '…esperando entrada…'}</div>
+              <div className="holo-label" style={{ marginTop: 6 }}>Salida</div>
+              <div className="hud-response">{response || '…'}</div>
             </div>
-          </div>
 
-          {/* Respuesta */}
-          <div style={styles.responseContainer}>
-            <div style={styles.label}>OUTPUT:</div>
-            <div style={styles.response}>
-              {response || isSpeaking ? response : '...'}
-            </div>
-          </div>
+            {history.length > 0 && (
+              <div className="holo-card hud-history j-history">
+                <div className="holo-label">Registro</div>
+                {history.slice(-8).map((msg, i) => (
+                  <div key={i} className="hud-history-item" style={{ color: msg.type === 'user' ? '#ffd79a' : '#bff3ff' }}>
+                    <span>{msg.type === 'user' ? 'TÚ ›' : 'JARVIS ›'}</span>
+                    {msg.text.length > 120 ? `${msg.text.substring(0, 120)}…` : msg.text}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
 
-          {/* Historial */}
-          <div style={styles.historyContainer} className="j-history">
-            <div style={styles.label}>HISTORIAL:</div>
-            <div style={styles.history}>
-              {history.slice(-6).map((msg, i) => (
-                <div key={i} style={{
-                  ...styles.historyItem,
-                  color: msg.type === 'user' ? '#00ff00' : '#00d4ff'
-                }}>
-                  <span style={{ opacity: 0.6 }}>
-                    {msg.type === 'user' ? '→ TÚ: ' : '⬤ JARVIS: '}
-                  </span>
-                  {msg.text.length > 80 ? `${msg.text.substring(0, 80)}…` : msg.text}
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* Derecha: el día de Nacho */}
+          <DashboardPanel refreshKey={refreshKey} />
         </div>
 
-        {/* Derecha - Panel con el día de Nacho */}
-        <DashboardPanel refreshKey={refreshKey} />
-        </div>
-
-        {/* Parte inferior - Controles */}
-        <div style={styles.controlPanel} className="j-controls">
-          {/* Botón micrófono grande */}
+        {/* Controles */}
+        <footer className="hud-controls j-controls">
           <button
             onClick={handleMicClick}
             disabled={status === 'disconnected'}
-            style={{
-              ...styles.micButton,
-              backgroundColor: isListening ? '#ff6600' : '#00d4ff',
-              boxShadow: `0 0 ${40 + waveIntensity}px ${isListening ? '#ff6600' : '#00d4ff'}`
-            }}
+            className={`hud-mic ${isListening ? 'is-listening' : ''}`}
+            aria-label={isListening ? 'Terminar de hablar' : 'Hablar con JARVIS'}
+            data-testid="mic"
           >
-            <span style={styles.micIcon}>
-              {isListening ? '🎤' : '🎧'}
-            </span>
+            <MicIcon listening={isListening} speaking={isSpeaking} />
           </button>
 
-          {/* Estado */}
-          <div style={styles.statusContainer} className="j-status">
-            <div style={{ ...styles.statusDot, backgroundColor: getStatusColor() }}></div>
-            <span style={styles.statusText}>{getStatusText()}</span>
+          <div className="hud-status j-status" style={{ color: statusColor }}>
+            <i />
+            <span>{statusText}</span>
           </div>
 
           <button
@@ -393,30 +452,27 @@ const JARVIS = () => {
               window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#conexiones`);
               setShowConexiones(true);
             }}
-            style={styles.conexionesButton}
-            className="j-btn-conexiones"
+            className="hud-btn j-btn-conexiones"
             data-testid="abrir-conexiones"
           >
-            CONEXIONES
+            Conexiones
           </button>
 
-          <a href={`${apiBase}/guia/`} style={styles.conexionesButton} className="j-btn-guia" data-testid="abrir-guia">
-            GUÍA
+          <a href={`${apiBase}/guia/`} className="hud-btn j-btn-guia" data-testid="abrir-guia">
+            Guía
           </a>
 
-          {/* Botón limpiar */}
           <button
             onClick={() => {
               setHistory([]);
               setTranscript('');
               setResponse('');
             }}
-            style={styles.clearButton}
-            className="j-clear"
+            className="hud-btn hud-btn-warn j-clear"
           >
-            LIMPIAR
+            Limpiar
           </button>
-        </div>
+        </footer>
       </div>
 
       {showConexiones && (
@@ -429,351 +485,16 @@ const JARVIS = () => {
         />
       )}
 
-      {/* Estilos globales */}
-      <style>{`
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        
-        body {
-          background: #0a0a0a;
-          color: #00d4ff;
-          font-family: 'Arial', sans-serif;
-          overflow: hidden;
-        }
-        
-        button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        /* iPhone y pantallas estrechas: una columna que se desplaza, con los
-           controles siempre a mano abajo, como en una app. */
-        @media (max-width: 760px) {
-          body { overflow: auto; }
-          .j-container {
-            height: auto !important; min-height: 100vh; min-height: 100dvh;
-            display: block !important; overflow: visible !important;
-          }
-          .j-background { position: fixed !important; inset: 0; }
-          .j-main {
-            width: 100% !important; height: auto !important; min-height: 100vh; min-height: 100dvh;
-            border: none !important; border-radius: 0 !important; box-shadow: none !important;
-            overflow: visible !important; gap: 14px !important;
-            padding: calc(env(safe-area-inset-top, 0px) + 14px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)) !important;
-          }
-          .j-row { flex-direction: column !important; flex: none !important; gap: 16px !important; }
-          .j-holo { min-width: 0 !important; flex: none !important; }
-          .j-headerinfo { display: none !important; }
-          .j-wave { height: 80px !important; margin: 4px 0 !important; }
-          .j-history { flex: none !important; }
-          .j-dash { min-width: 0 !important; overflow: visible !important; flex: none !important; }
-          .j-controls {
-            position: sticky; bottom: 0; z-index: 20; gap: 14px !important;
-            margin: 0 calc(-1 * max(16px, env(safe-area-inset-right, 0px))) 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
-            padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)) !important;
-            background: rgba(5, 8, 12, 0.94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-          }
-          .j-controls { flex-wrap: nowrap !important; justify-content: space-between !important; }
-          .j-controls > button:first-child { order: 2; width: 60px !important; height: 60px !important; font-size: 28px !important; }
-          .j-btn-conexiones { order: 1; }
-          .j-btn-guia { order: 3; min-width: 104px; text-align: center; }
-          .j-btn-conexiones, .j-btn-guia { padding: 10px 12px !important; font-size: 11px !important; }
-          .j-status, .j-clear { display: none !important; }
-        }
-        
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-10px); }
-        }
-        
-        @keyframes glow {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.8; }
-        }
-      `}</style>
+      {booting && (
+        <BootSequence
+          onDone={() => {
+            try { sessionStorage.setItem('jarvis_booted', '1'); } catch (e) { /* sin almacenamiento */ }
+            setBooting(false);
+          }}
+        />
+      )}
     </div>
   );
-};
-
-// Función para generar las ondas
-const generateWavePath = (waveIndex, intensity) => {
-  const points = [];
-  const amplitude = 30 + (intensity * 0.3);
-  const frequency = 0.05;
-  const phase = waveIndex * Math.PI / 3;
-
-  for (let x = 0; x <= 400; x += 10) {
-    const y = 75 + Math.sin((x * frequency) + phase) * amplitude;
-    points.push(`${x},${y}`);
-  }
-
-  return `M ${points.join(' L ')}`;
-};
-
-// Estilos
-const styles = {
-  container: {
-    width: '100vw',
-    height: '100vh',
-    background: '#0a0a0a',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    position: 'relative'
-  },
-  background: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-    background: 'radial-gradient(circle at center, rgba(0,212,255,0.05) 0%, transparent 70%)',
-    zIndex: 0
-  },
-  gridLines: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-    backgroundImage: `linear-gradient(0deg, transparent 24%, rgba(0,212,255,.1) 25%, rgba(0,212,255,.1) 26%, transparent 27%, transparent 74%, rgba(0,212,255,.1) 75%, rgba(0,212,255,.1) 76%, transparent 77%, transparent),
-                      linear-gradient(90deg, transparent 24%, rgba(0,212,255,.1) 25%, rgba(0,212,255,.1) 26%, transparent 27%, transparent 74%, rgba(0,212,255,.1) 75%, rgba(0,212,255,.1) 76%, transparent 77%, transparent)`,
-    backgroundSize: '50px 50px',
-    opacity: 0.1
-  },
-  particles: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%'
-  },
-  contentRow: {
-    flex: 1,
-    display: 'flex',
-    gap: '30px',
-    flexWrap: 'wrap',
-    minHeight: 0
-  },
-  mainContainer: {
-    width: '94%',
-    maxWidth: '1400px',
-    height: '90%',
-    background: 'linear-gradient(135deg, rgba(26,26,46,0.8) 0%, rgba(10,10,20,0.9) 100%)',
-    border: '2px solid #00d4ff',
-    borderRadius: '15px',
-    boxShadow: '0 0 40px rgba(0,212,255,0.3), inset 0 0 40px rgba(0,212,255,0.05)',
-    zIndex: 10,
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '30px',
-    gap: '20px',
-    overflow: 'auto'
-  },
-  holographicDisplay: {
-    flex: 1,
-    minWidth: '320px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '15px',
-    minHeight: 0
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: '15px',
-    borderBottom: '1px solid rgba(0,212,255,0.3)',
-    gap: '20px'
-  },
-  statusIndicator: {
-    width: '12px',
-    height: '12px',
-    borderRadius: '50%',
-    animation: 'glow 2s infinite'
-  },
-  title: {
-    fontSize: '24px',
-    color: '#00d4ff',
-    fontWeight: 'bold',
-    letterSpacing: '3px',
-    flex: 1
-  },
-  headerInfo: {
-    display: 'flex',
-    gap: '15px',
-    fontSize: '12px',
-    opacity: 0.7
-  },
-  version: {
-    color: '#00ff00'
-  },
-  model: {
-    color: '#ff6600'
-  },
-  waveContainer: {
-    height: '150px',
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    margin: '20px 0'
-  },
-  waveSvg: {
-    width: '100%',
-    height: '100%'
-  },
-  centerPulse: {
-    position: 'absolute',
-    width: '20px',
-    height: '20px',
-    borderRadius: '50%',
-    backgroundColor: '#00d4ff',
-    left: '50%',
-    top: '50%',
-    transform: 'translate(-50%, -50%)'
-  },
-  transcriptContainer: {
-    flex: 0.8
-  },
-  responseContainer: {
-    flex: 1
-  },
-  historyContainer: {
-    flex: 0.6,
-    overflowY: 'auto'
-  },
-  label: {
-    fontSize: '11px',
-    color: '#00ff00',
-    letterSpacing: '2px',
-    marginBottom: '8px',
-    opacity: 0.7,
-    fontWeight: 'bold'
-  },
-  transcript: {
-    padding: '10px 15px',
-    background: 'rgba(0,255,0,0.05)',
-    border: '1px solid rgba(0,255,0,0.2)',
-    borderRadius: '5px',
-    color: '#00ff00',
-    fontSize: '14px',
-    minHeight: '30px',
-    fontStyle: 'italic'
-  },
-  response: {
-    padding: '10px 15px',
-    background: 'rgba(0,212,255,0.05)',
-    border: '1px solid rgba(0,212,255,0.2)',
-    borderRadius: '5px',
-    color: '#00d4ff',
-    fontSize: '14px',
-    minHeight: '60px',
-    overflowY: 'auto'
-  },
-  history: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '5px',
-    fontSize: '12px',
-    maxHeight: '100px',
-    overflowY: 'auto',
-    paddingRight: '10px'
-  },
-  historyItem: {
-    padding: '5px 10px',
-    background: 'rgba(0,100,150,0.1)',
-    borderRadius: '3px',
-    wordBreak: 'break-word'
-  },
-  controlPanel: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '30px',
-    padding: '20px',
-    borderTop: '1px solid rgba(0,212,255,0.3)',
-    flexWrap: 'wrap'
-  },
-  micButton: {
-    width: '80px',
-    height: '80px',
-    borderRadius: '50%',
-    border: '2px solid #00d4ff',
-    background: '#00d4ff',
-    color: '#0a0a0a',
-    fontSize: '40px',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 'bold'
-  },
-  micIcon: {
-    display: 'block',
-    lineHeight: '1'
-  },
-  toggleContainer: {
-    display: 'flex',
-    gap: '10px',
-    background: 'rgba(0,0,0,0.3)',
-    padding: '5px',
-    borderRadius: '5px',
-    border: '1px solid rgba(0,212,255,0.2)'
-  },
-  toggleButton: {
-    padding: '8px 16px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    letterSpacing: '1px',
-    transition: 'all 0.3s ease'
-  },
-  statusContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px 15px',
-    background: 'rgba(0,0,0,0.3)',
-    borderRadius: '5px',
-    border: '1px solid rgba(0,212,255,0.2)'
-  },
-  statusDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    animation: 'glow 1.5s infinite'
-  },
-  statusText: {
-    fontSize: '12px',
-    letterSpacing: '1px',
-    fontWeight: 'bold'
-  },
-  clearButton: {
-    padding: '8px 16px',
-    background: 'rgba(255,102,0,0.2)',
-    border: '1px solid #ff6600',
-    color: '#ff6600',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    letterSpacing: '1px',
-    transition: 'all 0.3s ease'
-  },
-  conexionesButton: {
-    textDecoration: 'none',
-    padding: '8px 16px',
-    background: 'rgba(0,212,255,0.12)',
-    border: '1px solid #00d4ff',
-    color: '#00d4ff',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    letterSpacing: '1px',
-  }
 };
 
 export default JARVIS;

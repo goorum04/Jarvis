@@ -2148,6 +2148,7 @@ async def dashboard():
         }
     return {
         "owner": OWNER_NAME,
+        "city": HOME_CITY,
         "timezone": TIMEZONE,
         "updated_at": datetime.now(ZoneInfo(TIMEZONE)).isoformat(),
         "weather": {"temperature_c": temp} if temp is not None else None,
