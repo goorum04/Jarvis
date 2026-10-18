@@ -114,6 +114,12 @@ enum JarvisAPI {
         _ = try await send("api/car/left", method: "POST", timeout: 20)
     }
 
+    /// Lo mismo que muestra el panel (agenda, correo, coche, WHOOP…), para el arranque.
+    static func dashboard() async throws -> [String: Any] {
+        let data = try await send("api/dashboard", timeout: 12)
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
     static func registerPush(deviceToken: String, environment: String) async throws {
         _ = try await send("api/push/apns", method: "POST",
                            body: ["device_token": deviceToken, "environment": environment, "device": "iPhone"],

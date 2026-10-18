@@ -16,14 +16,26 @@ struct JARVISApp: App {
     }
 }
 
-/// Los colores de JARVIS: los mismos del panel y del icono.
+/// Los colores y letras de JARVIS: los mismos del panel holográfico.
 enum Theme {
-    static let background = Color(red: 0.020, green: 0.031, blue: 0.047)
-    static let surface = Color(red: 0.051, green: 0.082, blue: 0.118)
+    static let background = Color(red: 0.008, green: 0.024, blue: 0.039)
+    static let surface = Color(red: 0.035, green: 0.075, blue: 0.110)
     static let accent = Color(red: 0.145, green: 0.784, blue: 0.949)
+    static let ice = Color(red: 0.749, green: 0.953, blue: 1.000)
     static let text = Color(red: 0.851, green: 0.925, blue: 0.965)
     static let muted = Color(red: 0.557, green: 0.639, blue: 0.706)
     static let warning = Color(red: 1.000, green: 0.710, blue: 0.278)
+    static let alert = Color(red: 1.000, green: 0.302, blue: 0.369)
+    static let ok = Color(red: 0.239, green: 0.863, blue: 0.518)
+
+    /// Orbitron (títulos y cifras) y Share Tech Mono (rótulos), incluidas en la app.
+    static func display(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+        .custom("Orbitron", size: size).weight(weight)
+    }
+
+    static func mono(_ size: CGFloat) -> Font {
+        .custom("ShareTechMono-Regular", size: size)
+    }
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {

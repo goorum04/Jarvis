@@ -27,6 +27,7 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
                    let player = try? AVAudioPlayer(data: data) {
                     self.player = player
                     player.delegate = self
+                    player.isMeteringEnabled = true
                     if player.play() { return }
                 }
                 let utterance = AVSpeechUtterance(string: text)
@@ -35,6 +36,21 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
             }
         }
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Volumen de la voz en este instante (0…1), para que el núcleo la siga.
+    /// Se llama desde la pantalla, en el hilo principal.
+    func level() -> Double {
+        if let player, player.isPlaying {
+            player.updateMeters()
+            let decibels = Double(player.averagePower(forChannel: 0))
+            return max(0, min(1, (decibels + 45) / 45))
+        }
+        if synthesizer.isSpeaking {
+            let t = Date().timeIntervalSinceReferenceDate
+            return 0.35 + 0.25 * sin(t * 9) * sin(t * 2.3)
+        }
+        return 0
     }
 
     func stop() {

@@ -51,6 +51,42 @@ jobs:
           tail -n 3 build.log
           exit $status
 
+      # Abre la app en un iPhone simulado y saca capturas del arranque, de la
+      # pantalla principal y de la de conectar. Quedan en «Artifacts» de la
+      # ejecución (y, reducidas, en el registro, para revisarlas sin descargar).
+      - name: Capturas en el simulador
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          cd ios
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for r in sorted(d, reverse=True) if 'iOS' in r for x in d[r] if x['name'].startswith('iPhone') and 'Pro' in x['name']))")
+          xcrun simctl boot "$UDID"
+          xcodebuild build -project JARVIS.xcodeproj -scheme JARVIS -configuration Debug \
+            -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO -quiet
+          xcrun simctl bootstatus "$UDID"
+          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 || true
+          xcrun simctl install "$UDID" "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/JARVIS.app"
+          mkdir -p "$RUNNER_TEMP/capturas"
+          capture() {
+            xcrun simctl terminate "$UDID" "$IOS_BUNDLE_ID" 2>/dev/null || true
+            SIMCTL_CHILD_JARVIS_CAPTURA="$2" xcrun simctl launch "$UDID" "$IOS_BUNDLE_ID"
+            sleep "$3"
+            xcrun simctl io "$UDID" screenshot "$RUNNER_TEMP/capturas/$1.png"
+            sips -Z 900 -s format jpeg -s formatOptions 60 "$RUNNER_TEMP/capturas/$1.png" --out "$RUNNER_TEMP/$1.jpg" > /dev/null
+            echo "CAPTURA $1 INICIO"; base64 -i "$RUNNER_TEMP/$1.jpg" | fold -w 900; echo "CAPTURA $1 FIN"
+          }
+          capture arranque arranque 8
+          capture principal principal 6
+          capture conectar "" 6
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: capturas-iphone
+          path: ${{ runner.temp }}/capturas
+          if-no-files-found: ignore
+
       - name: Firmar y subir a TestFlight
         if: env.TIENE_APPLE == 'true'
         env:

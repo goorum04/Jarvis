@@ -46,6 +46,9 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.productivity
         ITSAppUsesNonExemptEncryption: false
+        UIAppFonts:
+          - Orbitron.ttf
+          - ShareTechMono-Regular.ttf
         UILaunchScreen:
           UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:

@@ -13,13 +13,14 @@ struct OnboardingView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
-                ArcReactor(phase: .idle)
-                    .frame(width: 150, height: 150)
-                    .padding(.top, 48)
-                Text("JARVIS")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                HoloCoreView(phase: .idle, showLabel: false)
+                    .frame(width: 200, height: 200)
+                    .padding(.top, 36)
+                Text("J.A.R.V.I.S")
+                    .font(Theme.display(30, weight: .heavy))
                     .tracking(8)
-                    .foregroundStyle(Theme.text)
+                    .foregroundStyle(Theme.ice)
+                    .shadow(color: Theme.accent, radius: 10)
                 Text("Conecta la app con tu JARVIS. En el panel de tu Mac, abre **Conexiones → Tu iPhone** y escanea el código.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(Theme.muted)
