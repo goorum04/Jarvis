@@ -231,14 +231,24 @@ private final class CoreState {
 
 // MARK: - Fondo
 
+/// Una imagen que llena el sitio que le dan sin ensancharlo (un
+/// `scaledToFill` suelto haría más ancha la pantalla y sacaría el texto).
+struct FillImage: View {
+    let name: String
+
+    var body: some View {
+        Color.clear
+            .overlay(Image(name).resizable().scaledToFill())
+            .clipped()
+    }
+}
+
 /// Fondo de JARVIS: la imagen holográfica, una rejilla en perspectiva y la viñeta.
 struct HoloBackground: View {
     var body: some View {
         ZStack {
             Theme.background
-            Image("HoloFondo")
-                .resizable()
-                .scaledToFill()
+            FillImage(name: "HoloFondo")
                 .opacity(0.32)
             Canvas { context, size in
                 // Suelo en rejilla que se pierde hacia el horizonte
@@ -356,9 +366,7 @@ struct BootView: View {
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
-            Image("HoloNucleo")
-                .resizable()
-                .scaledToFill()
+            FillImage(name: "HoloNucleo")
                 .blendMode(.screen)
                 .opacity(assembled ? 0.35 : 0)
                 .ignoresSafeArea()

@@ -75,9 +75,11 @@ jobs:
             sips -Z 900 -s format jpeg -s formatOptions 60 "$RUNNER_TEMP/capturas/$1.png" --out "$RUNNER_TEMP/$1.jpg" > /dev/null
             echo "CAPTURA $1 INICIO"; base64 -i "$RUNNER_TEMP/$1.jpg" | fold -w 900; echo "CAPTURA $1 FIN"
           }
+          # La primera vez que se abre, la app tarda en arrancar: se abre una vez antes.
+          xcrun simctl launch "$UDID" "$IOS_BUNDLE_ID"; sleep 20
+          capture conectar "" 6
           capture arranque arranque 8
           capture principal principal 6
-          capture conectar "" 6
 
       - uses: actions/upload-artifact@v4
         if: always()

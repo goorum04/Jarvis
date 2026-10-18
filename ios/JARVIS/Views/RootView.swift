@@ -16,7 +16,6 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            HoloBackground()
             if session.pairing == nil && captureMode == nil {
                 OnboardingView()
             } else {
@@ -28,6 +27,7 @@ struct RootView: View {
                 }
             }
         }
+        .background(HoloBackground())
     }
 }
 
