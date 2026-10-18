@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Instalar JARVIS</title>
+<style>
+  :root {
+    --bg: #f3f6f8; --surface: #ffffff; --text: #14202b; --muted: #556575; --line: #dbe3ea;
+    --accent: #0a7aa3; --accent-soft: #e3f3f9; --warn: #a15c00; --warn-soft: #fff3e0;
+    --code-bg: #0d1620; --code-text: #d9f3ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #070b10; --surface: #0d151e; --text: #d9ecf6; --muted: #8ea3b4; --line: #1b2836;
+      --accent: #25c8f2; --accent-soft: #0b2230; --warn: #ffb547; --warn-soft: #2a1d08;
+      --code-bg: #02060a; --code-text: #bfeeff; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #070b10; --surface: #0d151e; --text: #d9ecf6; --muted: #8ea3b4; --line: #1b2836;
+    --accent: #25c8f2; --accent-soft: #0b2230; --warn: #ffb547; --warn-soft: #2a1d08;
+    --code-bg: #02060a; --code-text: #bfeeff; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-block: 32px 64px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; }
+  .eyebrow { font-size: 12px; letter-spacing: 4px; font-weight: 700; color: var(--accent); }
+  h1 { font-size: 36px; line-height: 1.15; margin: 6px 0 10px; text-wrap: balance; letter-spacing: -0.5px; }
+  h2 { font-size: 23px; line-height: 1.25; margin: 0; text-wrap: balance; }
+  h3 { font-size: 17px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; max-width: 65ch; }
+  p:last-child { margin-bottom: 0; }
+  .lead { font-size: 19px; color: var(--muted); }
+  ul, ol { margin: 0; padding-left: 22px; }
+  li { margin: 7px 0; }
+  a { color: var(--accent); }
+  kbd {
+    font: 600 14px/1 -apple-system, sans-serif; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 6px; padding: 2px 6px; background: var(--surface);
+  }
+
+  .step { display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; scroll-margin-top: 16px; }
+  .num {
+    width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent); color: var(--bg); font-weight: 800; font-size: 18px;
+  }
+  .step-body { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .where { font-size: 13px; letter-spacing: 1.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  .checklist { list-style: none; padding: 0; }
+  .checklist li { padding-left: 30px; position: relative; }
+  .checklist li::before {
+    content: ""; position: absolute; left: 0; top: 4px; width: 18px; height: 18px;
+    border: 2px solid var(--accent); border-radius: 5px;
+  }
+
+  .command { background: var(--code-bg); color: var(--code-text); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .command code { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .command button {
+    align-self: flex-start; font: 700 15px/1 -apple-system, sans-serif; padding: 11px 18px; border-radius: 10px;
+    border: none; background: #25c8f2; color: #02060a; cursor: pointer;
+  }
+  .note { background: var(--warn-soft); border-radius: 12px; padding: 14px 16px; }
+  .note strong { color: var(--warn); }
+  .tip { background: var(--accent-soft); border-radius: 12px; padding: 14px 16px; }
+  .accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 10px; }
+  .accounts .card p { font-size: 15px; margin: 0; }
+  .path { font-weight: 600; }
+  footer { color: var(--muted); font-size: 14px; text-align: center; }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 30px; }
+    .step { grid-template-columns: 1fr; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <div class="eyebrow">J.A.R.V.I.S</div>
+    <h1>Instala JARVIS en tu Mac</h1>
+    <p class="lead">Unos 30 minutos, una sola vez. Después funciona solo: arranca con el Mac y se recupera solo si algo falla.</p>
+  </header>
+
+  <section class="card" aria-labelledby="antes">
+    <h2 id="antes" style="margin-bottom:10px">Antes de empezar</h2>
+    <ul class="checklist">
+      <li>Tu <strong>Mac</strong>, enchufado y con internet.</li>
+      <li>Tu <strong>iPhone</strong>.</li>
+      <li>El <strong>código de preparación</strong> que te hemos enviado (empieza por <code>JARVIS1:</code>).</li>
+      <li>Tu <strong>tarjeta</strong>, para dos cuentas de pago si aún no las tienes: el cerebro (Claude) y la voz (ElevenLabs).</li>
+    </ul>
+  </section>
+
+  <section class="step" id="paso1">
+    <div class="num">1</div>
+    <div class="step-body">
+      <div class="where">En el Mac</div>
+      <h2>Instala Tailscale</h2>
+      <p>Es lo que te deja hablar con JARVIS desde el coche o desde cualquier sitio, de forma segura. Es gratis.</p>
+      <ol>
+        <li>Descárgalo de <a href="https://tailscale.com/download/mac" target="_blank" rel="noreferrer">tailscale.com/download/mac</a> (o búscalo en la App Store).</li>
+        <li>Ábrelo e <strong>inicia sesión</strong> con tu cuenta de Google o de Apple.</li>
+        <li>Si el Mac te pide permiso para añadir una configuración de red, pulsa <strong>Permitir</strong>.</li>
+      </ol>
+      <p class="muted" style="color:var(--muted);font-size:15px">En el iPhone no hace falta instalarlo.</p>
+    </div>
+  </section>
+
+  <section class="step" id="paso2">
+    <div class="num">2</div>
+    <div class="step-body">
+      <div class="where">En el Mac</div>
+      <h2>Instala JARVIS</h2>
+      <ol>
+        <li>Abre la <strong>Terminal</strong>: pulsa <kbd>⌘</kbd> + <kbd>espacio</kbd>, escribe <em>Terminal</em> y pulsa <kbd>↩</kbd>.</li>
+        <li>Copia esta línea, pégala en la Terminal con <kbd>⌘</kbd> + <kbd>V</kbd> y pulsa <kbd>↩</kbd>:</li>
+      </ol>
+      <div class="command">
+        <code id="cmd">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/goorum04/Jarvis/main/instalar_jarvis.sh)"</code>
+        <button type="button" id="copy">Copiar la línea</button>
+      </div>
+      <ol start="3">
+        <li><strong>Espera.</strong> La primera vez tarda unos minutos. Es normal que salgan muchas líneas; las que van bien llevan ✓.</li>
+        <li>Si aparece un enlace de <strong>Tailscale</strong>, ábrelo con <kbd>⌘</kbd> + clic y pulsa para activarlo.
+          Si después la Terminal te dice que la vuelvas a ejecutar, pega otra vez la misma línea.</li>
+        <li>Al terminar, <strong>se abre solo el panel de JARVIS</strong> en el navegador, en la sección <em>Conexiones</em>.</li>
+      </ol>
+      <div class="tip">Puedes volver a pegar esta línea cuando quieras: no borra nada, solo pone JARVIS al día.</div>
+    </div>
+  </section>
+
+  <section class="step" id="paso3">
+    <div class="num">3</div>
+    <div class="step-body">
+      <div class="where">En el panel, en el Mac</div>
+      <h2>Pega el código de preparación</h2>
+      <p>Arriba del todo, en <span class="path">Código de preparación</span>: pega el código que te hemos enviado y pulsa
+        <strong>Aplicar</strong>. JARVIS se reinicia unos segundos.</p>
+    </div>
+  </section>
+
+  <section class="step" id="paso4">
+    <div class="num">4</div>
+    <div class="step-body">
+      <div class="where">En el panel, en el Mac</div>
+      <h2>Conecta tus cuentas</h2>
+      <p>Cada cuenta tiene su tarjeta. Lo que conectas se queda solo en tu Mac: nadie más ve tus claves, ni nosotros.
+        Con <strong>Probar</strong> compruebas que funciona.</p>
+      <div class="accounts">
+        <div class="card">
+          <h3>Cerebro (Claude) · imprescindible</h3>
+          <p>Crea tu cuenta en <a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>,
+            añade una tarjeta, ve a <em>API keys → Create key</em>, copia la clave, pégala en la tarjeta y pulsa <strong>Guardar</strong>.
+            JARVIS tiene un tope de gasto diario, así que nunca hay sorpresas.</p>
+        </div>
+        <div class="card">
+          <h3>Voz (ElevenLabs)</h3>
+          <p>Crea tu cuenta en <a href="https://elevenlabs.io" target="_blank" rel="noreferrer">elevenlabs.io</a>, elige un plan,
+            crea una <em>API key</em> en tu perfil y pégala. Sin esto, JARVIS te habla con la voz de Siri.</p>
+        </div>
+        <div class="card">
+          <h3>Gmail, Calendar y Docs</h3>
+          <p>Pulsa <strong>Conectar</strong> y entra con tu cuenta de Google. Si avisa de que la app no está verificada, es normal:
+            <em>Configuración avanzada → Ir a JARVIS</em>. Deja marcadas <strong>todas</strong> las casillas.</p>
+        </div>
+        <div class="card">
+          <h3>Mercedes me</h3>
+          <p>Escribe el número de bastidor (VIN): es el campo <strong>(E)</strong> del permiso de circulación y empieza por W1K.
+            Pulsa <strong>Guardar</strong>, luego <strong>Conectar</strong>, y entra con tu cuenta de Mercedes me.</p>
+        </div>
+        <div class="card">
+          <h3>Pulsera WHOOP</h3>
+          <p>Pulsa <strong>Conectar</strong> y entra con tu cuenta de WHOOP.</p>
+        </div>
+        <div class="card">
+          <h3>Tu tienda</h3>
+          <p><strong>WooCommerce:</strong> escribe la dirección de la tienda, <strong>Guardar</strong> y <strong>Conectar</strong>;
+            aprueba el acceso de lectura en tu tienda. <strong>Shopify:</strong> te ayudamos con este paso aparte.</p>
+        </div>
+        <div class="card">
+          <h3>Casa y trabajo</h3>
+          <p>Escribe las direcciones. Para las coordenadas, en Google Maps mantén pulsada tu casa: los dos números que salen son
+            la latitud y la longitud.</p>
+        </div>
+        <div class="card">
+          <h3>Llamadas en tu nombre</h3>
+          <p>Opcional. Si quieres que JARVIS llame por ti a restaurantes o al taller, te ayudamos con este paso aparte.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="step" id="paso5">
+    <div class="num">5</div>
+    <div class="step-body">
+      <div class="where">En el iPhone y el panel</div>
+      <h2>Avisos al iPhone</h2>
+      <ol>
+        <li>Instala <strong>Pushcut</strong> desde la App Store, ábrela y permite las notificaciones.</li>
+        <li>Crea una notificación que se llame exactamente <strong>JARVIS</strong>.</li>
+        <li>En su apartado <em>API</em>, copia tu <strong>Secret</strong>.</li>
+        <li>En el panel → <span class="path">Avisos al iPhone</span>: pégalo, pulsa <strong>Guardar</strong> y después
+          <strong>Probar</strong>. Te tiene que llegar un aviso de prueba.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="step" id="paso6">
+    <div class="num">6</div>
+    <div class="step-body">
+      <div class="where">En el iPhone</div>
+      <h2>Lleva JARVIS a tu iPhone</h2>
+      <ol>
+        <li><strong>El panel:</strong> en el panel del Mac, tarjeta <span class="path">Tu iPhone</span>, apunta la cámara del iPhone al
+          código QR y toca el enlace. En Safari: botón Compartir → <em>Añadir a pantalla de inicio</em>.</li>
+        <li><strong>Los atajos:</strong> abre ese panel en el iPhone → <span class="path">Conexiones → Tu iPhone</span> → toca
+          <em>Añadir «JARVIS»</em> → <em>Añadir atajo</em>. Cuando te pida la dirección y el token, cópialos con los botones de esa
+          misma tarjeta. Haz lo mismo con «JARVIS saludo» y «JARVIS coche».</li>
+        <li><strong>El saludo al subir al coche:</strong> app Atajos → <em>Automatización</em> → <em>+</em> → <em>CarPlay</em> →
+          <em>Se conecta</em> → <em>Ejecutar inmediatamente</em> → elige «JARVIS saludo».</li>
+        <li><strong>El aviso de coche abierto:</strong> otra automatización igual, con <em>Se desconecta</em> y «JARVIS coche».</li>
+        <li><strong>Que Siri te lea los avisos y los WhatsApp en el coche:</strong> Ajustes → Notificaciones →
+          <em>Anunciar notificaciones</em> → actívalo, con CarPlay, WhatsApp y Pushcut activados.</li>
+      </ol>
+      <div class="tip">Si en la tarjeta pone que los atajos te los enviaremos, salta los puntos 2 a 4 de momento: te avisamos cuando estén.
+        La primera vez que JARVIS mande un WhatsApp o haga una llamada, el iPhone te pedirá permiso: acéptalo, mejor con el coche parado.</div>
+    </div>
+  </section>
+
+  <section class="step" id="paso7">
+    <div class="num">7</div>
+    <div class="step-body">
+      <div class="where">Donde quieras</div>
+      <h2>Pruébalo</h2>
+      <p>Di <strong>«Oye Siri, JARVIS»</strong> y, cuando te escuche:</p>
+      <ul>
+        <li>«¿Qué tengo hoy?»</li>
+        <li>«¿Tengo correos importantes?»</li>
+        <li>«¿Cuánta gasolina tengo?»</li>
+        <li>«¿Cómo he dormido?»</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="note">
+    <strong>Muy importante:</strong> deja el Mac <strong>en casa, enchufado y con la tapa abierta</strong> (la pantalla puede
+    apagarse sola). Si cierras la tapa, JARVIS descansa hasta que la vuelvas a abrir. Más adelante lo pasaremos a la nube y estará activo siempre.
+  </section>
+
+  <section class="card">
+    <h2 style="margin-bottom:8px">¿Y ahora?</h2>
+    <p>Todo lo que puedes pedirle está en la <a href="../guia/">guía de uso</a>. También la tienes siempre en tu panel,
+      con el botón <strong>GUÍA</strong>.</p>
+    <p><strong>Si algo no va</strong>, haz una foto de la pantalla y envíanosla. Volver a pegar la línea del paso 2 nunca borra nada.</p>
+  </section>
+
+  <footer>JARVIS · asistente personal privado</footer>
+</main>
+<script>
+  const copyButton = document.getElementById('copy');
+  copyButton.addEventListener('click', async () => {
+    const text = document.getElementById('cmd').textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById('cmd'));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('copy');
+    }
+    copyButton.textContent = 'Copiada ✓ — ahora pégala en la Terminal';
+    setTimeout(() => { copyButton.textContent = 'Copiar la línea'; }, 4000);
+  });
+</script>
+</body>
+</html>

@@ -49,7 +49,13 @@ case "${1:-estado}" in
     "$PY" crear_agente_llamadas.py && launchctl kickstart -k "$TARGET"
     ;;
   actualizar)
-    git pull --ff-only
+    if [[ -d .git ]]; then
+      git pull --ff-only
+    else
+      # Instalado con la línea de la guía (sin git): se baja la última versión
+      # encima. Las claves, las conexiones y la memoria no están en el paquete.
+      curl -fsSL https://github.com/goorum04/Jarvis/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1
+    fi
     bash instalar.command
     ;;
   desinstalar)

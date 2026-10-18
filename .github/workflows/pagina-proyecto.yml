@@ -1,6 +1,9 @@
-# Publica la carpeta proyecto/ en GitHub Pages: https://goorum04.github.io/Jarvis/
-# Es la «URL de propósito» del proyecto de Mercedes. Solo se publica esa carpeta,
-# nunca el resto del repositorio.
+# Publica en GitHub Pages (https://goorum04.github.io/Jarvis/) solo estas páginas,
+# nunca el resto del repositorio:
+#   /            la página del proyecto («URL de propósito» de Mercedes y WHOOP)
+#   /instalar/   la guía para que Nacho instale JARVIS él solo
+#   /preparar/   el generador del código de preparación (funciona en el navegador)
+#   /guia/       la guía de uso (la misma que abre el botón GUÍA del panel)
 name: Página del proyecto
 
 on:
@@ -8,6 +11,7 @@ on:
     branches: [main]
     paths:
       - "proyecto/**"
+      - "guia/**"
       - ".github/workflows/pagina-proyecto.yml"
   workflow_dispatch:
 
@@ -29,8 +33,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Juntar las páginas
+        run: |
+          mkdir -p _site/guia
+          cp -R proyecto/. _site/
+          cp guia/index.html _site/guia/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: proyecto
+          path: _site
       - id: despliegue
         uses: actions/deploy-pages@v4

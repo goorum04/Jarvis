@@ -218,16 +218,161 @@ const ServiceCard = ({ service, onChanged }) => {
   );
 };
 
+const copyText = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    // Navegadores antiguos: se copia seleccionando un campo oculto.
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(area);
+    return copied;
+  }
+};
+
+const CopyRow = ({ label, value, testId }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div style={styles.copyRow}>
+      <span style={styles.fieldLabel}>{label}</span>
+      <div style={styles.copyLine}>
+        <code style={styles.copyValue} data-testid={testId}>{value}</code>
+        <button
+          type="button"
+          style={styles.secondary}
+          onClick={async () => {
+            setCopied(await copyText(value));
+            setTimeout(() => setCopied(false), 2000);
+          }}
+        >
+          {copied ? 'Copiado ✓' : 'Copiar'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Quien instala JARVIS le manda a Nacho un solo código con la identidad de las
+// apps de Google, Mercedes y WHOOP y los enlaces de los Atajos.
+const SetupCodeCard = ({ pending, onChanged }) => {
+  const [open, setOpen] = useState(pending);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  useEffect(() => setOpen(pending), [pending]);
+
+  const apply = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await apiPost('/api/conexiones/preparacion', { code });
+      setCode('');
+      await onChanged(true, `Preparado: ${result.prepared.join(', ')}. Ya puedes conectar tus cuentas.`);
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ ...styles.card, borderColor: pending ? '#ffaa0055' : '#00d4ff33' }} data-testid="codigo-preparacion">
+      <button type="button" style={{ ...styles.linkButton, color: '#00d4ff', fontSize: '15px', fontWeight: 'bold' }} onClick={() => setOpen(!open)}>
+        {open ? '▾' : '▸'} Código de preparación
+      </button>
+      {open && (
+        <>
+          <div style={styles.what}>
+            Si quien te instala JARVIS te ha enviado un código que empieza por <code>JARVIS1:</code>, pégalo aquí. Deja listas
+            de una vez las conexiones con Google, Mercedes y WHOOP, y los Atajos del iPhone.
+          </div>
+          <textarea
+            style={{ ...styles.input, minHeight: '80px', resize: 'vertical' }}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="JARVIS1:…"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            data-testid="campo-codigo"
+          />
+          <div style={styles.actions}>
+            <button type="button" style={styles.primary} disabled={busy || !code.trim()} onClick={apply} data-testid="aplicar-codigo">
+              {busy ? 'Aplicando…' : 'Aplicar'}
+            </button>
+          </div>
+          {message && <div style={{ ...styles.message, color: '#ff8888' }}>{message}</div>}
+        </>
+      )}
+    </div>
+  );
+};
+
+// Para llevar JARVIS al iPhone: el panel por QR, y la dirección y el token que
+// piden los Atajos al añadirlos.
+const IphoneCard = ({ info }) => (
+  <div style={styles.card} data-testid="tu-iphone">
+    <div style={styles.cardHead}>
+      <div style={styles.cardName}>Tu iPhone</div>
+    </div>
+    {!info.public_url ? (
+      <div style={styles.note}>
+        Falta el acceso desde fuera de casa (Tailscale). Cuando esté, aquí saldrá el código para abrir el panel en el iPhone.
+      </div>
+    ) : (
+      <>
+        <div style={styles.iphoneRow}>
+          {info.qr_svg && (
+            // El SVG lo genera el propio JARVIS (no viene de fuera).
+            // eslint-disable-next-line react/no-danger
+            <div style={styles.qr} dangerouslySetInnerHTML={{ __html: info.qr_svg }} data-testid="qr" />
+          )}
+          <div style={{ ...styles.what, flex: 1, minWidth: '180px' }}>
+            <strong>1.</strong> Apunta la cámara del iPhone a este código y toca el enlace: se abre tu panel.<br />
+            <strong>2.</strong> En Safari, botón Compartir → <em>Añadir a pantalla de inicio</em>.
+          </div>
+        </div>
+        <div style={styles.what}>
+          <strong>3.</strong> Los Atajos te piden la dirección y el token al añadirlos. Cópialos desde aquí (mejor con este panel abierto en el iPhone):
+        </div>
+        <CopyRow label="Dirección" value={info.public_url} testId="direccion" />
+        <CopyRow label="Token" value={info.token} testId="token" />
+      </>
+    )}
+    <div style={styles.what}><strong>Atajos de JARVIS</strong></div>
+    {info.shortcuts.map((shortcut) => (
+      <div key={shortcut.name} style={styles.shortcutRow}>
+        {shortcut.url ? (
+          <a style={styles.primaryLink} href={shortcut.url} target="_blank" rel="noreferrer">Añadir «{shortcut.name}»</a>
+        ) : (
+          <span style={styles.pendingShortcut}>«{shortcut.name}»: te lo enviará quien te instala JARVIS</span>
+        )}
+        <span style={styles.help}>{shortcut.help}</span>
+      </div>
+    ))}
+  </div>
+);
+
 const ConexionesPanel = ({ onClose }) => {
   const [services, setServices] = useState(null);
   const [error, setError] = useState('');
   const [banner, setBanner] = useState(() => readReturn());
   const [restarting, setRestarting] = useState(false);
+  const [iphone, setIphone] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const result = await apiGet('/api/conexiones');
+      const [result, iphoneInfo] = await Promise.all([apiGet('/api/conexiones'), apiGet('/api/conexiones/iphone')]);
       setServices(result.services);
+      setIphone(iphoneInfo);
       setError('');
     } catch (e) {
       setError(e.message === 'HTTP 401'
@@ -266,6 +411,8 @@ const ConexionesPanel = ({ onClose }) => {
     ['SERVICIOS DE JARVIS', services.filter((s) => !OWN_ACCOUNTS.includes(s.id))],
   ];
   const connected = services ? services.filter((s) => s.connected).length : 0;
+  // El código hace falta mientras alguna app de Google, Mercedes o WHOOP siga sin preparar.
+  const setupPending = !!services && services.some((s) => s.setup.length > 0 && !s.ready);
 
   return (
     <div style={styles.overlay} data-testid="conexiones">
@@ -290,6 +437,16 @@ const ConexionesPanel = ({ onClose }) => {
         )}
         {error && <div style={{ ...styles.banner, borderColor: '#ff6666', color: '#ff9999' }}>{error}</div>}
         {!services && !error && <div style={styles.muted}>Cargando…</div>}
+
+        {services && iphone && (
+          <div style={styles.group}>
+            <div style={styles.groupTitle}>PRIMEROS PASOS</div>
+            <div style={styles.grid}>
+              <SetupCodeCard pending={setupPending} onChanged={onChanged} />
+              <IphoneCard info={iphone} />
+            </div>
+          </div>
+        )}
 
         {groups && groups.map(([title, list]) => (
           <div key={title} style={styles.group}>
@@ -371,6 +528,20 @@ const styles = {
   danger: { ...button, background: 'transparent', color: '#ff8888', borderColor: '#ff8888' },
   linkButton: { background: 'none', border: 'none', color: '#ff9999', cursor: 'pointer', fontSize: '12px', textAlign: 'left', padding: 0 },
   link: { color: '#00d4ff', fontSize: '12px' },
+  copyRow: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  copyLine: { display: 'flex', gap: '8px', alignItems: 'center', minWidth: 0 },
+  copyValue: {
+    flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(0,212,255,0.25)', borderRadius: '6px',
+    padding: '8px 10px', fontSize: '13px', color: '#e6f8ff',
+  },
+  iphoneRow: { display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' },
+  qr: { width: '150px', height: '150px', background: '#ffffff', padding: '6px', borderRadius: '8px', flexShrink: 0 },
+  shortcutRow: { display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' },
+  primaryLink: {
+    ...button, background: '#00d4ff', color: '#001018', textDecoration: 'none', display: 'inline-block',
+  },
+  pendingShortcut: { fontSize: '13px', color: '#ffaa00' },
   message: { fontSize: '13px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.4 },
 };
 

@@ -15,6 +15,13 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 PORT=8000
 PY="$DIR/.venv/bin/python"
 
+# Cómo decirle que lo vuelva a ejecutar: con la línea de la guía o con este archivo.
+if [[ -n "${JARVIS_DESDE_ENLACE:-}" ]]; then
+  REPETIR="vuelve a pegar en la Terminal la misma línea de la guía"
+else
+  REPETIR="vuelve a ejecutar este instalador"
+fi
+
 paso() { printf "\n\033[1;36m▸ %s\033[0m\n" "$1"; }
 aviso() { printf "\033[1;33m⚠  %s\033[0m\n" "$1"; }
 bien() { printf "\033[1;32m✓ %s\033[0m\n" "$1"; }
@@ -138,15 +145,15 @@ PUBLIC_URL=""
 if [[ -z "$TS" ]]; then
   aviso "Tailscale no está instalado."
   echo "   Instálalo desde https://tailscale.com/download/mac (o la App Store),"
-  echo "   inicia sesión y vuelve a ejecutar este instalador."
+  echo "   inicia sesión y $REPETIR."
 elif ! "$TS" status >/dev/null 2>&1; then
   aviso "Tailscale está instalado pero sin sesión iniciada."
-  echo "   Ábrelo, inicia sesión y vuelve a ejecutar este instalador."
+  echo "   Ábrelo, inicia sesión y $REPETIR."
 elif ! "$TS" funnel --bg "$PORT"; then
   # La salida no se oculta: la primera vez Tailscale enseña aquí el enlace para
   # activar Funnel y espera a que se active.
   aviso "Tailscale no ha podido abrir el acceso público (Funnel)."
-  echo "   Sigue el enlace que aparece arriba para activarlo y vuelve a ejecutar este instalador."
+  echo "   Abre el enlace que aparece arriba (Cmd + clic), actívalo y $REPETIR."
 else
   PUBLIC_URL="$("$TS" status --json | "$PY" -c 'import json,sys; print("https://" + json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
   "$PY" - "$PUBLIC_URL" <<'EOF'
@@ -175,15 +182,18 @@ echo
 echo "════════════════════════════════════════════════════════════"
 echo "  JARVIS instalado."
 echo
+echo "  Panel (en este Mac): http://localhost:$PORT/?token=$TOKEN"
 if [[ -n "$PUBLIC_URL" ]]; then
-  echo "  Panel (tablet):  $PUBLIC_URL/?token=$TOKEN"
-  echo "  Para los Atajos: $PUBLIC_URL"
-else
-  echo "  Panel (en este Mac): http://localhost:$PORT/?token=$TOKEN"
+  echo "  Panel (iPhone y tablet): $PUBLIC_URL/?token=$TOKEN"
+  echo "  Dirección para los Atajos: $PUBLIC_URL"
 fi
-echo "  Token:           $TOKEN"
+echo "  Token: $TOKEN"
 echo
-echo "  Abre el panel y pulsa CONEXIONES: ahí Nacho conecta Gmail, Mercedes y"
-echo "  la tienda con su cuenta, y pega sus claves. No hace falta tocar el .env."
-echo "  Guía completa: CONFIGURAR_JARVIS.md"
+echo "  Se abre ahora el panel en el navegador, en CONEXIONES: ahí se conectan"
+echo "  las cuentas y se pegan las claves. No hace falta tocar ningún archivo."
+echo "  Guía: https://goorum04.github.io/Jarvis/instalar/"
 echo "════════════════════════════════════════════════════════════"
+
+# En este Mac, con «localhost»: es la dirección de vuelta que ya está registrada
+# en Google, Mercedes y WHOOP, así que las cuentas se conectan sin más.
+open "http://localhost:$PORT/?token=$TOKEN#conexiones" 2>/dev/null || true

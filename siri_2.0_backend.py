@@ -2210,6 +2210,25 @@ async def list_conexiones():
     return {"services": conexiones.list_services(), "public_url": os.getenv("PUBLIC_URL", "")}
 
 
+class CodigoPreparacion(BaseModel):
+    code: str
+
+
+@app.post("/api/conexiones/preparacion", dependencies=[Depends(require_token)])
+async def apply_setup_code(body: CodigoPreparacion):
+    try:
+        prepared = conexiones.apply_setup_code(body.code)
+    except Exception as e:
+        raise _conexion_error(e)
+    restart_soon()
+    return {"ok": True, "prepared": prepared, "restarting": True}
+
+
+@app.get("/api/conexiones/iphone", dependencies=[Depends(require_token)])
+async def iphone_setup():
+    return conexiones.iphone_info()
+
+
 @app.post("/api/conexiones/llamadas/preparar", dependencies=[Depends(require_token)])
 async def prepare_calls():
     ok, output = await asyncio.to_thread(conexiones.prepare_calls)

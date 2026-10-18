@@ -5,8 +5,82 @@ Los detalles de cada servicio están en **[CONFIGURAR_JARVIS.md](CONFIGURAR_JARV
 (cada paso indica qué apartado). La guía para Nacho, la de uso, está en el
 propio panel (botón **GUÍA**) y en [`guia/index.html`](guia/index.html).
 
-Tiempo aproximado: una hora de preparación desde tu ordenador y una hora y
-media en casa de Nacho, con él delante para la parte de sus cuentas.
+Hay dos formas de instalarlo:
+
+- **A distancia: lo instala Nacho solo** con su guía,
+  <https://goorum04.github.io/Jarvis/instalar/>. Tú preparas las apps y le
+  envías el enlace y un código. Ver el apartado siguiente.
+- **En persona**: sigues tú las partes A a F de abajo, con Nacho delante para
+  sus cuentas. Una hora de preparación y una hora y media en su casa.
+
+---
+
+## Instalación a distancia (la hace Nacho)
+
+Nacho solo tiene que pegar una línea en la Terminal y seguir su guía. Tú
+preparas antes tres cosas y se las envías.
+
+### 1. Preparar las apps
+
+La parte A de abajo: Google Cloud, Mercedes y WHOOP (y Twilio si va a usar
+llamadas). Con la redirección de `localhost` basta: en su guía, Nacho conecta
+las cuentas desde el panel en su Mac, y el instalador ya le abre el panel con
+`localhost`.
+
+### 2. Los tres Atajos del iPhone, para compartirlos
+
+Se crean una vez en **tu** iPhone y se comparten por iCloud. Al añadirlos,
+el iPhone de Nacho le pregunta su dirección y su token, que copia de su panel
+(*Conexiones → Tu iPhone*).
+
+| Atajo | Qué hace | Contenido |
+|---|---|---|
+| **JARVIS** | Hablar con él: «Oye Siri, JARVIS» | CONFIGURAR §8.1 |
+| **JARVIS saludo** | Saludo al conectar CarPlay | Lo de dentro de la automatización de §8.2 |
+| **JARVIS coche** | Aviso de coche abierto al desconectar CarPlay | Lo de dentro de la automatización de §8.3 |
+
+Para que sirvan a cualquiera:
+
+1. Al principio de cada atajo, dos acciones **Texto**: una con una dirección
+   cualquiera (`https://ejemplo.ts.net`) y otra con un token cualquiera. En el
+   resto del atajo, usa esas dos variables donde §8 pone `TU_DIRECCIÓN` y `TOKEN`.
+2. En cada atajo: **ⓘ (Detalles) → Configurar → Preguntas de importación →
+   Añadir pregunta** para cada una de esas dos acciones Texto, con las
+   preguntas «Dirección de JARVIS» y «Token de JARVIS».
+3. **Compartir → Copiar enlace de iCloud.** Los tres enlaces empiezan por
+   `https://www.icloud.com/shortcuts/`.
+
+Pruébalos antes en tu iPhone, añadiéndolos con los datos de un JARVIS de
+pruebas, o con los de Nacho cuando ya lo tenga instalado.
+
+### 3. El código de preparación
+
+En <https://goorum04.github.io/Jarvis/preparar/> pega los ID y secretos de
+cliente de Google, Mercedes y WHOOP, la clave de Routes y los tres enlaces de
+los atajos, y pulsa **Generar código**. Se genera en tu navegador: no se envía
+nada a ningún sitio. El resultado empieza por `JARVIS1:`.
+
+Si falta algo (por ejemplo, Mercedes aún no ha aprobado el proyecto), genera
+el código con lo que tengas. Más adelante le mandas otro solo con lo nuevo:
+pegarlo no borra lo que ya tenía.
+
+### 4. Enviárselo
+
+- El enlace de su guía: <https://goorum04.github.io/Jarvis/instalar/>
+- El código de preparación, **en un mensaje privado aparte**. Que lo borre
+  cuando lo haya pegado.
+
+Su guía le lleva por: Tailscale → la línea de la Terminal → el código → sus
+cuentas → Pushcut → el iPhone (QR del panel, atajos y automatizaciones de
+CarPlay) → probarlo. Si algo falla, te mandará una foto de la pantalla.
+
+### 5. Después
+
+- Pídele la dirección pública que sale en *Conexiones → Tu iPhone* y añádela a
+  las redirecciones de Google, Mercedes y WHOOP (parte B.4). Así podrá
+  reconectar cuentas también desde el iPhone.
+- Lo que queda fuera de su guía, y es mejor hacerlo con él: la tienda
+  Shopify, las llamadas (Twilio) y los Atajos de casa y música.
 
 ---
 
@@ -57,34 +131,29 @@ nada de Nacho hasta que él pulsa *Conectar* y acepta.
 - [ ] **Voz propia**, opcional (CONFIGURAR §10): diseñarla en ElevenLabs y apuntar su Voice ID.
 
 Apunta en un sitio seguro los ID y secretos de cliente de Google, Mercedes y
-WHOOP: los pegarás en el panel en el paso B.5.
+WHOOP: van en el código de preparación (paso B.3).
 
 ## B. En el Mac de Nacho
 
-- [ ] **1. Bajar JARVIS** a su carpeta personal (no en Documentos, Escritorio
-      ni Descargas). En Terminal:
+- [ ] **1. Tailscale**: instalarlo (<https://tailscale.com/download/mac>) e iniciar sesión.
+- [ ] **2. Instalar JARVIS**: en la Terminal, pegar la línea de la guía de
+      Nacho (la descarga en `~/JARVIS`, sin necesidad de git, y la instala):
       ```
-      git clone https://github.com/goorum04/Jarvis.git ~/JARVIS
-      ```
-      Si el Mac pide instalar las «herramientas de línea de comandos», aceptar y
-      repetir el comando.
-- [ ] **2. Tailscale**: instalarlo (<https://tailscale.com/download/mac>) e iniciar sesión.
-- [ ] **3. Instalar**:
-      ```
-      cd ~/JARVIS
-      bash instalar.command
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/goorum04/Jarvis/main/instalar_jarvis.sh)"
       ```
       La primera vez Tailscale muestra un enlace para activar *Funnel*: abrirlo,
-      aceptar y volver a ejecutar el instalador. Al final muestra la
-      **dirección** (`https://….ts.net`), el **enlace del panel** y el **token**.
+      aceptar y, si lo pide, volver a pegar la línea. Al final muestra la
+      **dirección** (`https://….ts.net`), los enlaces del panel y el **token**, y
+      abre el panel en el navegador.
+- [ ] **3. Código de preparación** (o, a mano, el apartado *Preparación* de las
+      tarjetas de Gmail, Mercedes y WHOOP): generarlo en
+      <https://goorum04.github.io/Jarvis/preparar/> y pegarlo en el panel →
+      **CONEXIONES** → *Código de preparación*.
 - [ ] **4. Añadir la dirección pública** a las redirecciones de Google, Mercedes
       y WHOOP (la misma ruta que en la parte A, cambiando
       `http://localhost:8000` por `https://….ts.net`). Así Nacho podrá conectar
       desde el iPhone, no solo desde el Mac.
-- [ ] **5. Abrir el panel** con el enlace que dio el instalador → **CONEXIONES** →
-      en *Gmail*, *Mercedes me* y *Pulsera WHOOP*, abrir **Preparación** y pegar
-      el ID y el secreto de cliente de cada una.
-- [ ] **6. Energía**: en Ajustes del Sistema → Batería → *Opciones*, activar la
+- [ ] **5. Energía**: en Ajustes del Sistema → Batería → *Opciones*, activar la
       opción que evita el reposo automático con el adaptador de corriente cuando
       la pantalla está apagada. JARVIS ya evita el reposo por inactividad, pero
       así queda doblemente asegurado. Recordarle a Nacho: **tapa abierta**.
@@ -113,7 +182,7 @@ Al guardar, JARVIS se reinicia solo unos segundos para aplicar los cambios.
 
 ## D. Su iPhone (y la tablet)
 
-Detalle en CONFIGURAR §7 y §8. Hacen falta la dirección y el token del paso B.3.
+Detalle en CONFIGURAR §7 y §8. Hacen falta la dirección y el token del paso B.2 (también en el panel → Conexiones → Tu iPhone).
 
 - [ ] **1. Pushcut**: instalar la app, crear una notificación llamada `JARVIS` y
       copiar el *Secret* (*Ajustes → API*) en Conexiones → Avisos.
@@ -198,7 +267,7 @@ Todo se hace desde la carpeta `~/JARVIS`. Actualizar no borra claves, conexiones
 | Siri: «hubo un problema con el atajo» | Mac cerrado, dormido o sin internet; o Tailscale cerrado | Abrir el Mac; `./jarvis.sh estado`; comprobar que Tailscale está abierto y `tailscale funnel status` |
 | Google o Mercedes: «redirect_uri_mismatch» al conectar | La dirección de vuelta no está registrada **exactamente** igual | Revisar las redirecciones (parte A y B.4). `localhost` y `127.0.0.1` cuentan como distintas: abrir el panel con `localhost` |
 | El correo deja de funcionar a los 7 días | Pantalla de consentimiento de Google en modo «Prueba» | Publicarla (CONFIGURAR §2) y *Volver a conectar* |
-| Conectar la tienda WooCommerce no deja | Falta la dirección pública activa | Terminar B.3 (Funnel) |
+| Conectar la tienda WooCommerce no deja | Falta la dirección pública activa | Terminar B.2 (Funnel) |
 | El panel dice «no tiene el acceso de JARVIS» | Abierto sin el token | Abrir el enlace con `?token=` del instalador |
 | Los avisos no llegan | Pushcut sin conectar o notificaciones desactivadas | Conexiones → Avisos → *Probar*; revisar los ajustes del iPhone |
 | Los datos del coche no salen | Nombres de campos de Mercedes distintos | `./jarvis.sh logs` muestra el JSON de Mercedes; ajustar `car.py` (CONFIGURAR §4) |

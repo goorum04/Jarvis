@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Código de preparación de JARVIS</title>
+<style>
+  :root {
+    --bg: #f3f6f8; --surface: #ffffff; --text: #14202b; --muted: #556575; --line: #dbe3ea;
+    --accent: #0a7aa3; --accent-soft: #e3f3f9; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #070b10; --surface: #0d151e; --text: #d9ecf6; --muted: #8ea3b4; --line: #1b2836;
+      --accent: #25c8f2; --accent-soft: #0b2230; --error: #ff8a80; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #070b10; --surface: #0d151e; --text: #d9ecf6; --muted: #8ea3b4; --line: #1b2836;
+    --accent: #25c8f2; --accent-soft: #0b2230; --error: #ff8a80; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-block: 32px 64px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .eyebrow { font-size: 12px; letter-spacing: 4px; font-weight: 700; color: var(--accent); }
+  h1 { font-size: 30px; margin: 4px 0 8px; text-wrap: balance; }
+  p { margin: 0 0 10px; max-width: 65ch; }
+  .muted { color: var(--muted); }
+  fieldset { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 14px 18px 18px; margin: 0; }
+  legend { font-weight: 700; padding: 0 6px; }
+  label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 14px; }
+  input, textarea {
+    font: 15px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%;
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+  button {
+    font: 600 15px/1 -apple-system, BlinkMacSystemFont, sans-serif; padding: 12px 18px; border-radius: 10px;
+    border: none; background: var(--accent); color: #ffffff; cursor: pointer;
+  }
+  .result { background: var(--accent-soft); border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .result textarea { min-height: 120px; word-break: break-all; }
+  .error { color: var(--error); font-weight: 600; }
+  .private { font-size: 14px; border-left: 3px solid var(--accent); padding-left: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">J.A.R.V.I.S</div>
+    <h1>Código de preparación</h1>
+    <p class="muted">Para quien instala JARVIS. Junta en un solo código la identidad de las apps de Google, Mercedes y
+      WHOOP, la clave de rutas y los enlaces de los Atajos. Nacho lo pega una vez en su panel
+      (<em>Conexiones → Código de preparación</em>) y ya puede conectar sus cuentas.</p>
+    <p class="private">El código se genera aquí mismo, en tu navegador: lo que escribas no se envía a ningún sitio.
+      Mándaselo a Nacho por un mensaje privado y bórralo después.</p>
+  </header>
+
+  <form id="form" autocomplete="off">
+    <fieldset>
+      <legend>Google (Gmail, Calendar y Docs)</legend>
+      <label>ID de cliente OAuth <input name="GOOGLE_OAUTH_CLIENT_ID" placeholder="…apps.googleusercontent.com"></label>
+      <label>Secreto del cliente <input name="GOOGLE_OAUTH_CLIENT_SECRET" type="password"></label>
+    </fieldset>
+    <fieldset style="margin-top:12px">
+      <legend>Mercedes</legend>
+      <label>Client ID <input name="MERCEDES_CLIENT_ID"></label>
+      <label>Client Secret <input name="MERCEDES_CLIENT_SECRET" type="password"></label>
+    </fieldset>
+    <fieldset style="margin-top:12px">
+      <legend>WHOOP</legend>
+      <label>Client ID <input name="WHOOP_CLIENT_ID"></label>
+      <label>Client Secret <input name="WHOOP_CLIENT_SECRET" type="password"></label>
+    </fieldset>
+    <fieldset style="margin-top:12px">
+      <legend>Tráfico y rutas</legend>
+      <label>Clave de Google Maps (Routes API) <input name="GOOGLE_MAPS_API_KEY" type="password"></label>
+    </fieldset>
+    <fieldset style="margin-top:12px">
+      <legend>Atajos del iPhone (enlaces de iCloud)</legend>
+      <label>«JARVIS» <input name="ATAJO_JARVIS_URL" placeholder="https://www.icloud.com/shortcuts/…"></label>
+      <label>«JARVIS saludo» <input name="ATAJO_SALUDO_URL" placeholder="https://www.icloud.com/shortcuts/…"></label>
+      <label>«JARVIS coche» <input name="ATAJO_COCHE_URL" placeholder="https://www.icloud.com/shortcuts/…"></label>
+      <span class="hint">Cómo crearlos y compartirlos: GUIA_INSTALACION.md, «Instalación a distancia».</span>
+    </fieldset>
+    <p class="hint" style="margin-top:12px">Deja en blanco lo que no vaya a usar. Lo que ya tenga puesto en su JARVIS no se toca.</p>
+    <button type="submit">Generar código</button>
+  </form>
+
+  <div id="error" class="error" hidden></div>
+  <div id="result" class="result" hidden>
+    <strong>Código para Nacho</strong>
+    <textarea id="code" readonly></textarea>
+    <div><button type="button" id="copy">Copiar</button></div>
+  </div>
+</main>
+<script>
+  const form = document.getElementById('form');
+  const errorBox = document.getElementById('error');
+  const result = document.getElementById('result');
+  const codeBox = document.getElementById('code');
+  const copyButton = document.getElementById('copy');
+
+  // Mismo formato que lee JARVIS (conexiones.apply_setup_code): JARVIS1: + JSON en base64 de URL.
+  const encode = (values) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(values));
+    let binary = '';
+    bytes.forEach((b) => { binary += String.fromCharCode(b); });
+    return 'JARVIS1:' + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    errorBox.hidden = true;
+    const values = {};
+    for (const input of form.querySelectorAll('input')) {
+      const value = input.value.trim();
+      if (value) {
+        values[input.name] = value;
+      }
+    }
+    const badShortcut = Object.entries(values).find(([k, v]) => k.startsWith('ATAJO_') && !v.startsWith('https://www.icloud.com/shortcuts/'));
+    if (!Object.keys(values).length) {
+      errorBox.textContent = 'Rellena al menos un dato.';
+    } else if (badShortcut) {
+      errorBox.textContent = 'Los enlaces de los atajos tienen que empezar por https://www.icloud.com/shortcuts/';
+    } else {
+      codeBox.value = encode(values);
+      result.hidden = false;
+      result.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+    errorBox.hidden = false;
+  });
+
+  copyButton.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(codeBox.value);
+    } catch (e) {
+      codeBox.select();
+      document.execCommand('copy');
+    }
+    copyButton.textContent = 'Copiado ✓';
+    setTimeout(() => { copyButton.textContent = 'Copiar'; }, 2000);
+  });
+</script>
+</body>
+</html>

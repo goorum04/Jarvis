@@ -45,6 +45,7 @@
   section { scroll-margin-top: 16px; }
 
   .back { display: inline-block; font-size: 15px; text-decoration: none; margin-bottom: 18px; }
+  .back[hidden] { display: none; }
   .toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
   .toc a {
     text-decoration: none; font-size: 14px; padding: 6px 12px; border-radius: 999px;
@@ -349,5 +350,11 @@
 
   <footer>JARVIS · asistente personal privado</footer>
 </main>
+<script>
+  // Fuera de JARVIS (la copia pública de la guía) no hay panel al que volver.
+  if (location.hostname.endsWith('github.io') || location.protocol === 'file:') {
+    document.querySelectorAll('.back').forEach((link) => { link.hidden = true; });
+  }
+</script>
 </body>
 </html>

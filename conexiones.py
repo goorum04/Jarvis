@@ -541,3 +541,91 @@ def prepare_calls() -> tuple[bool, str]:
     with contextlib.redirect_stdout(output):
         code = crear_agente_llamadas.main()
     return code == 0, output.getvalue().strip()
+
+
+# ── Código de preparación ─────────────────────────────────────────────────────
+# Quien instala le manda a Nacho un solo código con la identidad de las apps
+# (Google, Mercedes, WHOOP, la clave de rutas) y los enlaces de los Atajos del
+# iPhone. Nacho lo pega una vez en Conexiones y no tiene que copiar seis datos.
+# Se genera en https://goorum04.github.io/Jarvis/preparar/ (en el navegador,
+# sin enviar nada a ningún sitio).
+
+SETUP_CODE_PREFIX = "JARVIS1:"
+
+# Atajos compartidos por iCloud que Nacho añade a su iPhone con un toque.
+SHORTCUTS = [
+    {"env": "ATAJO_JARVIS_URL", "name": "JARVIS", "help": "Para hablarle: «Oye Siri, JARVIS»."},
+    {"env": "ATAJO_SALUDO_URL", "name": "JARVIS saludo", "help": "Te saluda al conectar CarPlay (lo lanza una automatización)."},
+    {"env": "ATAJO_COCHE_URL", "name": "JARVIS coche", "help": "Avisa si el coche queda abierto al desconectar CarPlay."},
+]
+SHORTCUT_PREFIX = "https://www.icloud.com/shortcuts/"
+
+
+def setup_code_keys() -> set[str]:
+    keys = {f["env"] for s in SERVICES for f in s["setup"]}
+    return keys | {"GOOGLE_MAPS_API_KEY"} | {s["env"] for s in SHORTCUTS}
+
+
+def make_setup_code(values: dict[str, str]) -> str:
+    import base64
+    data = json.dumps({k: v for k, v in values.items() if v}, separators=(",", ":"), ensure_ascii=False).encode()
+    return SETUP_CODE_PREFIX + base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def apply_setup_code(code: str) -> list[str]:
+    """Aplica el código y devuelve qué ha preparado (para decírselo a Nacho)."""
+    import base64
+    code = "".join((code or "").split())  # al copiar por mensaje se cuelan saltos de línea
+    if not code.startswith(SETUP_CODE_PREFIX):
+        raise ConexionError("Eso no es un código de preparación de JARVIS: tiene que empezar por JARVIS1:")
+    payload = code[len(SETUP_CODE_PREFIX):]
+    try:
+        values = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except Exception:
+        raise ConexionError("El código está incompleto o mal copiado. Cópialo otra vez entero.")
+    if not isinstance(values, dict) or not values:
+        raise ConexionError("El código está vacío.")
+    allowed = setup_code_keys()
+    unknown = [k for k in values if k not in allowed]
+    if unknown:
+        raise ConexionError(f"El código trae datos que no son de preparación: {', '.join(unknown)}.")
+    for key, value in values.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ConexionError(f"El código trae {key} vacío.")
+        if key.startswith("ATAJO_") and not value.startswith(SHORTCUT_PREFIX):
+            raise ConexionError("Los enlaces de los atajos tienen que ser de iCloud (https://www.icloud.com/shortcuts/…).")
+    save_env({k: v.strip() for k, v in values.items()})
+    names = [s["name"] for s in SERVICES if any(f["env"] in values for f in s["setup"])]
+    if "GOOGLE_MAPS_API_KEY" in values:
+        names.append("Tráfico y rutas")
+    if any(s["env"] in values for s in SHORTCUTS):
+        names.append("Atajos del iPhone")
+    return names
+
+
+def iphone_info() -> dict:
+    """Lo que necesita el iPhone: el panel (con QR para abrirlo con la cámara),
+    la dirección y el token que piden los Atajos al añadirlos, y sus enlaces."""
+    public = _env("PUBLIC_URL").rstrip("/")
+    token = _env("JARVIS_API_TOKEN")
+    panel_url = f"{public}/?token={token}" if public and token else None
+    qr_svg = None
+    if panel_url:
+        import io
+
+        import qrcode
+        import qrcode.image.svg
+        image = qrcode.make(panel_url, image_factory=qrcode.image.svg.SvgPathImage, border=2)
+        buffer = io.BytesIO()
+        image.save(buffer)
+        qr_svg = buffer.getvalue().decode()
+        qr_svg = qr_svg[qr_svg.index("<svg"):]  # sin la cabecera XML, para incrustarlo
+        # Que ocupe la caja del panel, sea cual sea su tamaño.
+        qr_svg = re.sub(r'width="[^"]*" height="[^"]*"', 'width="100%" height="100%"', qr_svg, count=1)
+    return {
+        "public_url": public or None,
+        "token": token,
+        "panel_url": panel_url,
+        "qr_svg": qr_svg,
+        "shortcuts": [{"name": s["name"], "help": s["help"], "url": _env(s["env"]) or None} for s in SHORTCUTS],
+    }
