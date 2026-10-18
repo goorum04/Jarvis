@@ -171,6 +171,18 @@ SERVICES = [
         ],
     },
     {
+        "id": "casa", "name": "Casa y trabajo", "kind": "keys",
+        "what": "Para el tiempo, el tráfico, la hora de salir y «llévame a casa» o «a la oficina».",
+        "setup": [],
+        "fields": [
+            _field("HOME_ADDRESS", "Dirección de casa", secret=False),
+            _field("WORK_ADDRESS", "Dirección de la oficina", secret=False, optional=True),
+            _field("HOME_LAT", "Latitud de casa", secret=False,
+                   help="En Google Maps, mantén pulsada tu casa: salen dos números; el primero es la latitud."),
+            _field("HOME_LON", "Longitud de casa", secret=False, help="El segundo número."),
+        ],
+    },
+    {
         "id": "claude", "name": "Cerebro (Claude)", "kind": "keys",
         "what": "La inteligencia de JARVIS. Sin esto no puede responder.",
         "link": "https://console.anthropic.com/settings/keys",
@@ -308,6 +320,15 @@ def save_fields(service_id: str, values: dict[str, str]) -> bool:
             raise ConexionError(f"{key} no pertenece a {service['name']}.")
         if isinstance(value, str) and value.strip():
             changes[key] = value.strip()
+    for key, name, low, high in (("HOME_LAT", "La latitud", -90, 90), ("HOME_LON", "La longitud", -180, 180)):
+        if key in changes:
+            try:
+                value = float(changes[key].replace(",", "."))
+            except ValueError:
+                raise ConexionError(f"{name} tiene que ser un número, por ejemplo 42.5078.")
+            if not low <= value <= high:
+                raise ConexionError("Ese número no es una coordenada válida.")
+            changes[key] = str(value)
     if "WOO_URL" in changes:
         changes["WOO_URL"] = _normalize_store_url(changes["WOO_URL"])
     if "SHOPIFY_SHOP" in changes:

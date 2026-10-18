@@ -2260,6 +2260,7 @@ async def test_conexion(service_id: str):
         "voz": diagnostico.check_voice,
         "avisos": lambda: diagnostico.check_notifications(True),
         "mapas": diagnostico.check_maps,
+        "casa": diagnostico.check_weather,
         "llamadas": diagnostico.check_calls,
     }
     if service_id not in checks:
@@ -2354,6 +2355,16 @@ if PROYECTO_DIR.is_dir():
         return RedirectResponse("/proyecto/")
 
     app.mount("/proyecto", StaticFiles(directory=PROYECTO_DIR, html=True), name="proyecto")
+
+# Guía de uso para Nacho (botón «GUÍA» del panel). Pública como el propio panel:
+# no lleva ningún dato suyo.
+GUIA_DIR = Path(__file__).parent / "guia"
+if GUIA_DIR.is_dir():
+    @app.get("/guia", include_in_schema=False)
+    async def guia_sin_barra():
+        return RedirectResponse("/guia/")
+
+    app.mount("/guia", StaticFiles(directory=GUIA_DIR, html=True), name="guia")
 
 PANEL_DIR = Path(__file__).parent / "panel"
 if PANEL_DIR.is_dir():

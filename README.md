@@ -27,8 +27,13 @@ la tablet, y termina con una comprobación que dice qué falta configurar.
 
 Después, Nacho abre el panel y pulsa **CONEXIONES**: ahí conecta Gmail,
 Mercedes, WHOOP y la tienda con su propia cuenta, y pega sus claves, sin
-pasárselas a nadie. El resto está en **[CONFIGURAR_JARVIS.md](CONFIGURAR_JARVIS.md)**
-(preparación de Google, Mercedes y WHOOP, avisos y Atajos del iPhone).
+pasárselas a nadie.
+
+## Guías
+
+- **[GUIA_INSTALACION.md](GUIA_INSTALACION.md)**: instalación paso a paso, en orden, con lista de comprobación.
+- **[CONFIGURAR_JARVIS.md](CONFIGURAR_JARVIS.md)**: referencia detallada de cada servicio (Google, Mercedes, WHOOP, tienda, avisos, Atajos del iPhone, llamadas).
+- **Guía de uso para Nacho**: en el propio panel, botón **GUÍA** (es [`guia/index.html`](guia/index.html)).
 
 ## Uso diario
 

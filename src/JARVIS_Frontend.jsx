@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ConexionesPanel from './ConexionesPanel';
 import DashboardPanel from './DashboardPanel';
-import { wsUrl } from './config';
+import { apiBase, wsUrl } from './config';
 
 const JARVIS = () => {
   // Estados
@@ -399,6 +399,10 @@ const JARVIS = () => {
             CONEXIONES
           </button>
 
+          <a href={`${apiBase}/guia/`} style={styles.conexionesButton} data-testid="abrir-guia">
+            GUÍA
+          </a>
+
           {/* Botón limpiar */}
           <button
             onClick={() => {
@@ -722,6 +726,7 @@ const styles = {
     transition: 'all 0.3s ease'
   },
   conexionesButton: {
+    textDecoration: 'none',
     padding: '8px 16px',
     background: 'rgba(0,212,255,0.12)',
     border: '1px solid #00d4ff',

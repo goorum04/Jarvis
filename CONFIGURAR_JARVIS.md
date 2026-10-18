@@ -1,5 +1,8 @@
 # Configurar JARVIS para Nacho
 
+> Para instalarlo de principio a fin, sigue **[GUIA_INSTALACION.md](GUIA_INSTALACION.md)**:
+> es la lista ordenada. Este documento es la referencia detallada de cada pieza.
+
 El cerebro de JARVIS vive en su Mac. El iPhone y el coche (CarPlay) escuchan
 y hablan a través de Siri y de Atajos de iOS; una tablet en casa u oficina
 hace de panel permanente. Esta guía cubre lo que hay que hacer una sola vez.
@@ -61,9 +64,11 @@ Quien instala solo prepara una vez la «identidad» de la app en Google
    el diagnóstico. Al final muestra la **dirección** y el **token** que
    necesitan el iPhone y la tablet. Se puede volver a ejecutar cuando se
    quiera; no borra nada.
-4. Rellenar en `.env` al menos `CLAUDE_API_KEY` y `ELEVENLABS_API_KEY`, y
-   también `HOME_LAT`, `HOME_LON`, `HOME_ADDRESS` (casa) y `WORK_ADDRESS`
-   (oficina). `TIMEZONE` y `HOME_CITY` ya vienen puestos para Andorra. Después: `./jarvis.sh reiniciar`.
+4. Abrir el panel con el enlace del instalador → **CONEXIONES**: ahí Nacho
+   pega al menos la clave de Claude y la de ElevenLabs, y en *Casa y trabajo*
+   las direcciones y las coordenadas de casa. `TIMEZONE` y `HOME_CITY` ya
+   vienen puestos para Andorra. (También se puede todo a mano en el `.env` y
+   después `./jarvis.sh reiniciar`.)
 
 **El Mac tiene que estar encendido y despierto.** JARVIS impide que se duerma
 por inactividad mientras está en marcha. Con el portátil de Nacho en casa:
