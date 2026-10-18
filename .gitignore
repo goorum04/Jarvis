@@ -23,3 +23,9 @@ docs/*
 docs/sensible/*
 !docs/sensible/.gitkeep
 chroma_db/
+
+# App de iPhone: lo genera XcodeGen (ios/project.yml) al compilar
+ios/JARVIS.xcodeproj/
+ios/JARVIS/Info.plist
+ios/JARVIS/JARVIS.entitlements
+ios/build.log

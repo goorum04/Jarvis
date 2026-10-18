@@ -1,0 +1,66 @@
+# App de iPhone «JARVIS». El proyecto de Xcode lo genera XcodeGen a partir de
+# este archivo (no se guarda en el repositorio):
+#
+#   cd ios && xcodegen generate
+#
+# La compilación y la subida a TestFlight las hace GitHub Actions
+# (.github/workflows/ios.yml). IOS_BUNDLE_ID y APPLE_TEAM_ID llegan de ahí.
+name: JARVIS
+options:
+  bundleIdPrefix: com.goorum04
+  deploymentTarget:
+    iOS: "18.0"
+  developmentLanguage: es
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "${APPLE_TEAM_ID}"
+targets:
+  JARVIS:
+    type: application
+    platform: iOS
+    sources:
+      - path: JARVIS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "${IOS_BUNDLE_ID}"
+        PRODUCT_NAME: JARVIS
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+    entitlements:
+      path: JARVIS/JARVIS.entitlements
+      properties:
+        aps-environment: development
+    info:
+      path: JARVIS/Info.plist
+      properties:
+        CFBundleDisplayName: JARVIS
+        CFBundleDevelopmentRegion: es
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSApplicationCategoryType: public.app-category.productivity
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIUserInterfaceStyle: Dark
+        UIBackgroundModes:
+          - audio
+          - remote-notification
+        NSMicrophoneUsageDescription: Para que puedas hablar con JARVIS.
+        NSSpeechRecognitionUsageDescription: Para entender lo que le dices a JARVIS.
+        NSCameraUsageDescription: Para escanear el código de tu panel y conectar la app con tu JARVIS.
+        NSLocationWhenInUseUsageDescription: Para calcular el tráfico desde donde estás y avisarte de cuándo salir.
+        NSContactsUsageDescription: Para llamar o escribir por WhatsApp a tus contactos cuando se lo pides a JARVIS.
+        LSApplicationQueriesSchemes:
+          - whatsapp
+          - comgooglemaps
+          - waze
+          - shortcuts
