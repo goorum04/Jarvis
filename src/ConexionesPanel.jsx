@@ -336,8 +336,9 @@ const IphoneCard = ({ info }) => (
             <div style={styles.qr} dangerouslySetInnerHTML={{ __html: info.qr_svg }} data-testid="qr" />
           )}
           <div style={{ ...styles.what, flex: 1, minWidth: '180px' }}>
-            <strong>1.</strong> Apunta la cámara del iPhone a este código y toca el enlace: se abre tu panel.<br />
-            <strong>2.</strong> En Safari, botón Compartir → <em>Añadir a pantalla de inicio</em>.
+            <strong>Con la app JARVIS:</strong> ábrela, pulsa <em>Escanear el código</em> y apunta a este código. Listo.<br /><br />
+            <strong>Sin la app:</strong> apunta la cámara del iPhone a este código y toca el enlace. En Safari, botón
+            Compartir → <em>Añadir a pantalla de inicio</em>.
           </div>
         </div>
         <div style={styles.what}>

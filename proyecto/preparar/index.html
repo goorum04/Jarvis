@@ -84,6 +84,14 @@
       <label>Clave de Google Maps (Routes API) <input name="GOOGLE_MAPS_API_KEY" type="password"></label>
     </fieldset>
     <fieldset style="margin-top:12px">
+      <legend>App de iPhone (avisos de Apple)</legend>
+      <label>Key ID de la clave de avisos <input name="APNS_KEY_ID" placeholder="ABC123DEFG"></label>
+      <label>Team ID de tu cuenta de desarrollador <input name="APNS_TEAM_ID" placeholder="XYZ987WVUT"></label>
+      <label>Archivo de la clave (.p8) <input type="file" id="p8" accept=".p8"></label>
+      <label>Identificador de la app <input name="APNS_TOPIC" placeholder="com.goorum04.jarvis"></label>
+      <span class="hint">Solo si Nacho usa la app de iPhone. El archivo se lee aquí mismo y viaja dentro del código.</span>
+    </fieldset>
+    <fieldset style="margin-top:12px">
       <legend>Atajos del iPhone (enlaces de iCloud)</legend>
       <label>«JARVIS» <input name="ATAJO_JARVIS_URL" placeholder="https://www.icloud.com/shortcuts/…"></label>
       <label>«JARVIS saludo» <input name="ATAJO_SALUDO_URL" placeholder="https://www.icloud.com/shortcuts/…"></label>
@@ -116,11 +124,29 @@
     return 'JARVIS1:' + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   };
 
+  // El .p8 se lee en el navegador y entra en el código en base64.
+  let p8 = '';
+  document.getElementById('p8').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    p8 = '';
+    if (file) {
+      const text = await file.text();
+      p8 = text.includes('BEGIN PRIVATE KEY') ? btoa(text) : '';
+      if (!p8) {
+        errorBox.textContent = 'Ese archivo no es una clave .p8 de Apple.';
+        errorBox.hidden = false;
+      }
+    }
+  });
+
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     errorBox.hidden = true;
     const values = {};
-    for (const input of form.querySelectorAll('input')) {
+    if (p8) {
+      values.APNS_KEY_P8 = p8;
+    }
+    for (const input of form.querySelectorAll('input[name]')) {
       const value = input.value.trim();
       if (value) {
         values[input.name] = value;

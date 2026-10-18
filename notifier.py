@@ -4,6 +4,7 @@ pregunten (recordatorios, correo importante, gasolina, hora de salir).
 
 Se usan todos los canales que estén configurados:
 
+- La app de iPhone «JARVIS»: avisos de Apple con su icono. Ver apns.py.
 - Avisos propios de JARVIS (recomendado, sin apps aparte): en el panel
   instalado en la pantalla de inicio, Conexiones → «Avisos en este
   dispositivo». Ver webpush.py.
@@ -23,13 +24,19 @@ logger = logging.getLogger(__name__)
 
 
 def is_configured() -> bool:
+    import apns
     import webpush
-    return bool(os.getenv("PUSHCUT_SECRET") or os.getenv("NTFY_TOPIC")) or webpush.is_configured()
+    return bool(os.getenv("PUSHCUT_SECRET") or os.getenv("NTFY_TOPIC")) or webpush.is_configured() or apns.is_configured()
 
 
 def _webpush(title: str, text: str, url: Optional[str], urgent: bool) -> bool:
     import webpush
     return webpush.send(title, text, url, urgent)
+
+
+def _app(title: str, text: str, url: Optional[str], urgent: bool) -> bool:
+    import apns
+    return apns.send(title, text, url, urgent)
 
 
 def _pushcut(title: str, text: str, url: Optional[str], urgent: bool) -> bool:
@@ -63,7 +70,7 @@ def _ntfy(title: str, text: str, url: Optional[str], urgent: bool) -> bool:
 def notify(title: str, text: str, url: Optional[str] = None, urgent: bool = False) -> bool:
     """Devuelve True si al menos un canal lo entregó. Nunca lanza excepción."""
     delivered = False
-    for channel in (_webpush, _pushcut, _ntfy):
+    for channel in (_app, _webpush, _pushcut, _ntfy):
         try:
             delivered = channel(title, text, url, urgent) or delivered
         except Exception as e:

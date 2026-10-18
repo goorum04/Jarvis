@@ -16,6 +16,7 @@ vuelta una clave guardada; solo ve si está puesta o no.
 Lo único que prepara una vez quien instala JARVIS es la «identidad» de la app
 en Google y en Mercedes (el cliente OAuth): ver CONFIGURAR_JARVIS.md.
 """
+import base64
 import json
 import logging
 import os
@@ -269,8 +270,9 @@ def _connected(service_id: str) -> bool:
     if service_id == "shopify":
         return bool(_env("SHOPIFY_SHOP") and _env("SHOPIFY_ACCESS_TOKEN"))
     if service_id == "avisos":
+        import apns
         import webpush
-        return bool(_env("PUSHCUT_SECRET") or _env("NTFY_TOPIC")) or webpush.is_configured()
+        return bool(_env("PUSHCUT_SECRET") or _env("NTFY_TOPIC")) or webpush.is_configured() or apns.is_configured()
     if service_id == "llamadas":
         return bool(_env("ELEVENLABS_AGENT_ID") and _env("ELEVENLABS_PHONE_NUMBER_ID"))
     return all(_env(f["env"]) for f in _BY_ID[service_id]["fields"] if not f["optional"])
@@ -565,18 +567,18 @@ SHORTCUT_PREFIX = "https://www.icloud.com/shortcuts/"
 
 def setup_code_keys() -> set[str]:
     keys = {f["env"] for s in SERVICES for f in s["setup"]}
-    return keys | {"GOOGLE_MAPS_API_KEY"} | {s["env"] for s in SHORTCUTS}
+    # La clave de avisos de la app de iPhone es de la cuenta de desarrollador de Apple.
+    apple = {"APNS_KEY_ID", "APNS_TEAM_ID", "APNS_KEY_P8", "APNS_TOPIC"}
+    return keys | {"GOOGLE_MAPS_API_KEY"} | {s["env"] for s in SHORTCUTS} | apple
 
 
 def make_setup_code(values: dict[str, str]) -> str:
-    import base64
     data = json.dumps({k: v for k, v in values.items() if v}, separators=(",", ":"), ensure_ascii=False).encode()
     return SETUP_CODE_PREFIX + base64.urlsafe_b64encode(data).decode().rstrip("=")
 
 
 def apply_setup_code(code: str) -> list[str]:
     """Aplica el código y devuelve qué ha preparado (para decírselo a Nacho)."""
-    import base64
     code = "".join((code or "").split())  # al copiar por mensaje se cuelan saltos de línea
     if not code.startswith(SETUP_CODE_PREFIX):
         raise ConexionError("Eso no es un código de preparación de JARVIS: tiene que empezar por JARVIS1:")
@@ -596,12 +598,21 @@ def apply_setup_code(code: str) -> list[str]:
             raise ConexionError(f"El código trae {key} vacío.")
         if key.startswith("ATAJO_") and not value.startswith(SHORTCUT_PREFIX):
             raise ConexionError("Los enlaces de los atajos tienen que ser de iCloud (https://www.icloud.com/shortcuts/…).")
+        if key == "APNS_KEY_P8":
+            try:
+                pem = base64.b64decode(value.strip() + "=" * (-len(value.strip()) % 4), validate=True)
+            except Exception:
+                pem = b""
+            if b"BEGIN PRIVATE KEY" not in pem:
+                raise ConexionError("La clave de avisos de Apple no es un archivo .p8 válido.")
     save_env({k: v.strip() for k, v in values.items()})
     names = [s["name"] for s in SERVICES if any(f["env"] in values for f in s["setup"])]
     if "GOOGLE_MAPS_API_KEY" in values:
         names.append("Tráfico y rutas")
     if any(s["env"] in values for s in SHORTCUTS):
         names.append("Atajos del iPhone")
+    if "APNS_KEY_P8" in values:
+        names.append("Avisos de la app de iPhone")
     return names
 
 

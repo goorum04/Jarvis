@@ -7,6 +7,7 @@ propio panel (botón **GUÍA**) y en [`guia/index.html`](guia/index.html).
 
 Hay dos formas de instalarlo:
 
+- **App de iPhone**, opcional y más profesional: ver «App de iPhone» más abajo.
 - **A distancia: lo instala Nacho solo** con su guía,
   <https://goorum04.github.io/Jarvis/instalar/>. Tú preparas las apps y le
   envías el enlace y un código. Ver el apartado siguiente.
@@ -216,6 +217,75 @@ Detalle en CONFIGURAR §7 y §8. Hacen falta la dirección y el token del paso B
 - [ ] Recordarle: **Mac en casa, enchufado y con la tapa abierta**.
 - [ ] Dejarle claro que puede ver todo lo que JARVIS ha hecho en su nombre en el
       panel, y retirar cualquier conexión con *Desconectar*.
+
+---
+
+## App de iPhone «JARVIS» (TestFlight)
+
+La app propia de JARVIS: se instala desde un enlace, se conecta escaneando el
+QR del panel, «Oye Siri, habla con JARVIS» funciona sin crear atajos, los
+avisos llegan con su icono y en el coche saluda con la voz de JARVIS. El
+código está en `ios/`. **No hace falta un Mac:** GitHub la compila y la sube a
+TestFlight, y cada mes sube una versión nueva para que no caduque (las de
+TestFlight duran 90 días).
+
+### Una vez, en Apple
+
+1. **Cuenta de desarrollador** en <https://developer.apple.com/programs>
+   (99 al año), a nombre de quien vaya a publicarla. El **Team ID** sale en
+   *Cuenta → Membresía*.
+2. **Identificador de la app**: *Certificates, Identifiers & Profiles →
+   Identifiers → +* → *App IDs* → *App* → identificador explícito
+   `com.goorum04.jarvis` (o el que quieras; entonces ponlo en GitHub como
+   variable `IOS_BUNDLE_ID`), y marca **Push Notifications**.
+3. **La app en App Store Connect**: <https://appstoreconnect.apple.com> →
+   *Apps → + → Nueva app* → iOS, con ese identificador. El nombre tiene que
+   ser único en la App Store (por ejemplo «JARVIS asistente»); en el iPhone se
+   llamará igualmente JARVIS.
+4. **Clave de la API de App Store Connect** (para que GitHub suba la app):
+   *Usuarios y acceso → Integraciones → App Store Connect API → +*, con acceso
+   **Administrador**. Descarga el `.p8` (solo se puede una vez) y apunta el
+   **Key ID** y el **Issuer ID**.
+5. **Clave de avisos** (para que JARVIS mande avisos a la app):
+   *Certificates, Identifiers & Profiles → Keys → +* → *Apple Push
+   Notifications service (APNs)*. Descarga su `.p8` y apunta su **Key ID**.
+   Es otra clave distinta de la del punto 4.
+
+### Una vez, en GitHub
+
+En el repositorio → *Settings → Secrets and variables → Actions → New
+repository secret*:
+
+| Secreto | Valor |
+|---|---|
+| `APPLE_TEAM_ID` | El Team ID (punto 1) |
+| `ASC_KEY_ID` | El Key ID de la clave de la API (punto 4) |
+| `ASC_ISSUER_ID` | El Issuer ID (punto 4) |
+| `ASC_KEY_P8` | El contenido del `.p8` de la API (punto 4), tal cual |
+
+Después: *Actions → App de iPhone → Run workflow*. En unos 15 minutos la
+versión aparece en App Store Connect → *TestFlight*.
+
+### Avisos de la app
+
+En el generador del código de preparación
+(<https://goorum04.github.io/Jarvis/preparar/>), apartado *App de iPhone*: el
+Key ID de la clave de avisos (punto 5), el Team ID, su archivo `.p8` y el
+identificador de la app. Nacho lo pega como el resto del código.
+
+### Invitar a Nacho
+
+App Store Connect → *TestFlight → Testers externos → +* → crea un grupo,
+añade su correo (el de su Apple ID) y la versión. La primera vez Apple la
+revisa, normalmente en un día; pide un correo de contacto y una descripción
+breve de la prueba. A Nacho le llega un correo: instala la app **TestFlight**,
+abre la invitación y pulsa *Instalar*.
+
+Al abrir JARVIS, escanea el QR de su panel (*Conexiones → Tu iPhone*) y
+acepta los permisos (micrófono, avisos, ubicación). Para el coche, en la app
+Atajos → *Automatización → CarPlay*: *Se conecta* → «Saludo de JARVIS» y *Se
+desconecta* → «Me bajo del coche». Con la app no hacen falta los tres atajos
+compartidos.
 
 ---
 

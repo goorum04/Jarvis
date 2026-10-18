@@ -42,6 +42,7 @@ import phone_calls  # noqa: E402
 import store  # noqa: E402
 import weather  # noqa: E402
 import webpush  # noqa: E402
+import apns  # noqa: E402
 import whoop  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -2238,13 +2239,33 @@ async def push_unsubscribe(body: PushSuscripcion):
 
 @app.get("/api/push/devices", dependencies=[Depends(require_token)])
 async def push_devices():
-    return {"devices": [{"device": d["device"], "since": d["since"]} for d in webpush.devices()]}
+    web = [{"device": d["device"], "since": d["since"]} for d in webpush.devices()]
+    ios = [{"device": f"App JARVIS ({d['device']})", "since": d["since"]} for d in apns.devices()] if apns.is_ready() else []
+    return {"devices": web + ios}
+
+
+class ApnsRegistro(BaseModel):
+    device_token: str
+    environment: str = "production"
+    device: str = "iPhone"
+
+
+@app.post("/api/push/apns", dependencies=[Depends(require_token)])
+async def push_apns(body: ApnsRegistro):
+    """Lo llama la app de iPhone al abrirla: apunta el iPhone para sus avisos."""
+    try:
+        count = apns.register(body.device_token, body.environment, body.device)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "devices": count, "ready": apns.is_ready()}
 
 
 @app.post("/api/push/test", dependencies=[Depends(require_token)])
 async def push_test():
-    delivered = await asyncio.to_thread(webpush.send, "JARVIS", "Aviso de prueba: así te llegarán mis avisos.")
-    return {"ok": delivered}
+    text = "Aviso de prueba: así te llegarán mis avisos."
+    web, app_ios = await asyncio.gather(asyncio.to_thread(webpush.send, "JARVIS", text),
+                                        asyncio.to_thread(apns.send, "JARVIS", text))
+    return {"ok": web or app_ios}
 
 
 # ── CONEXIONES (las hace Nacho desde el panel) ────────────────────────────────

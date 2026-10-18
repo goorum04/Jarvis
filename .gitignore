@@ -15,6 +15,7 @@ google_token.json
 conexiones.json
 # Dispositivos con los avisos de JARVIS activados
 push_subscriptions.json
+apns_devices.json
 
 # RAG: los documentos y el índice son propios de cada instalación/cliente
 docs/*
